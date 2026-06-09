@@ -25,9 +25,6 @@
       <div class="text-sm text-slate-600">
         Runs every day at <strong id="scheduleDisplay" class="text-slate-800">{{ schedule.time }}</strong>
         <span class="text-slate-400 text-xs ml-1">(Asia/Dhaka)</span>
-        {% if schedule.next_run %}
-        <span class="ml-2 text-slate-400 text-xs">· Next: <strong class="text-slate-600">{{ schedule.next_run }}</strong></span>
-        {% endif %}
       </div>
       <div class="text-xs text-slate-400 mt-1.5 flex items-center gap-1.5">
         <i class="bi bi-info-circle"></i>
@@ -39,6 +36,9 @@
       <input type="time" id="scheduleTime" class="form-input" value="{{ schedule.time }}" style="width:140px;" />
       <button onclick="saveSchedule()" class="btn btn-sm btn-outline" id="saveScheduleBtn">
         <i class="bi bi-check-lg"></i>Save
+      </button>
+      <button onclick="triggerNow()" class="btn btn-sm btn-outline-gray" id="triggerNowBtn" title="Run collection now to test">
+        <i class="bi bi-play-fill"></i>Run Now
       </button>
     </div>
   </div>
@@ -596,6 +596,22 @@ async function saveSchedule() {
     btn.innerHTML = '<i class="bi bi-check-lg"></i>Saved!';
     btn.classList.remove('btn-outline'); btn.classList.add('btn-success');
     setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('btn-success'); btn.classList.add('btn-outline'); }, 2000);
+  }
+}
+
+async function triggerNow() {
+  const btn = document.getElementById('triggerNowBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="bi bi-arrow-repeat spin mr-1"></span>Running…';
+  const res = await fetch('/api/collect/trigger', { method:'POST', headers:{'Content-Type':'application/json'} });
+  if (res.ok) {
+    btn.innerHTML = '<i class="bi bi-check-lg"></i>Triggered!';
+    btn.classList.add('btn-success');
+    setTimeout(() => { location.reload(); }, 3000);
+  } else {
+    btn.innerHTML = '<i class="bi bi-x-lg"></i>Failed';
+    btn.disabled = false;
+    setTimeout(() => { btn.innerHTML = '<i class="bi bi-play-fill"></i>Run Now'; btn.classList.remove('btn-success'); btn.disabled = false; }, 2000);
   }
 }
 

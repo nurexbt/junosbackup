@@ -34,6 +34,7 @@ def _today():
 _scheduler: BackgroundScheduler | None = None
 _schedule_time = {'hour': 2, 'minute': 0}
 _app_ref       = None   # set once in start_scheduler()
+_collect_fn    = None   # set once in start_scheduler() – avoids re-import inside job
 
 
 def get_schedule_info() -> dict:
@@ -65,9 +66,15 @@ def set_schedule_time(time_str: str):
         logger.error('Invalid schedule time %s: %s', time_str, exc)
 
 
-def start_scheduler(flask_app):
-    global _scheduler, _app_ref
-    _app_ref = flask_app
+def start_scheduler(flask_app, collect_fn):
+    """
+    collect_fn: the run_collection_job function from app.py.
+    Passed in explicitly so the scheduler never re-imports app.py,
+    which would create a second SQLAlchemy instance and break DB access.
+    """
+    global _scheduler, _app_ref, _collect_fn
+    _app_ref    = flask_app
+    _collect_fn = collect_fn
 
     _scheduler = BackgroundScheduler(daemon=True)
     h, m = _schedule_time['hour'], _schedule_time['minute']
@@ -86,18 +93,22 @@ def start_scheduler(flask_app):
 
 
 def _scheduled_run():
-    """Called by APScheduler – delegates to app.py via app context."""
-    if _app_ref is None:
-        logger.error('Scheduler fired but _app_ref is None')
+    """Called by APScheduler – runs collection inside the app context."""
+    if _app_ref is None or _collect_fn is None:
+        logger.error('Scheduler fired but app/collect_fn not initialised')
         return
-    logger.info('Scheduled collection triggered')
-    with _app_ref.app_context():
-        # Import here – inside app context, no circular issue at call time
-        from app import run_collection_job
-        results = run_collection_job()
-        ok   = sum(1 for r in results if r.get('status') == 'success')
-        fail = sum(1 for r in results if r.get('status') == 'failed')
-        logger.info('Scheduled collection done – %d success, %d failed', ok, fail)
+    logger.info('Scheduled collection triggered at %s',
+                datetime.now(TZ_DHAKA).strftime('%Y-%m-%d %H:%M %Z'))
+    try:
+        with _app_ref.app_context():
+            results = _collect_fn()
+            ok   = sum(1 for r in results if r.get('status') == 'success')
+            fail = sum(1 for r in results if r.get('status') == 'failed')
+            skip = sum(1 for r in results if r.get('status') == 'skipped')
+            logger.info('Scheduled collection done – %d success, %d failed, %d skipped',
+                        ok, fail, skip)
+    except Exception as exc:
+        logger.error('Scheduled collection crashed: %s', exc, exc_info=True)
 
 
 # ── Pure SSH functions (no DB, no app imports) ────────────────────────────────

@@ -83,8 +83,9 @@
           <td class="text-slate-400 text-xs whitespace-nowrap">{{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td class="text-right">
             <div class="flex items-center justify-end gap-1">
-              <a href="{{ url_for('config_view', config_id=c.id) }}" class="btn btn-xs btn-outline"><i class="bi bi-eye"></i></a>
-              <button onclick="deleteConfig({{ c.id }})" class="btn btn-xs btn-outline-red"><i class="bi bi-trash"></i></button>
+              <a href="{{ url_for('config_view', config_id=c.id) }}" class="btn btn-xs btn-outline" title="View config"><i class="bi bi-eye"></i></a>
+              <a href="{{ url_for('download_config', config_id=c.id) }}" class="btn btn-xs btn-outline-gray" title="Download .txt"><i class="bi bi-download"></i></a>
+              <button onclick="deleteConfig({{ c.id }})" class="btn btn-xs btn-outline-red" title="Delete"><i class="bi bi-trash"></i></button>
             </div>
           </td>
         </tr>
@@ -127,7 +128,10 @@
           <td class="text-slate-400 text-xs">{{ log.message or '—' }}</td>
           <td>
             {% if log.config_id %}
-            <a href="{{ url_for('config_view', config_id=log.config_id) }}" class="btn btn-xs btn-outline"><i class="bi bi-eye"></i></a>
+            <div class="flex items-center gap-1">
+              <a href="{{ url_for('config_view', config_id=log.config_id) }}" class="btn btn-xs btn-outline" title="View config"><i class="bi bi-eye"></i></a>
+              <a href="{{ url_for('download_config', config_id=log.config_id) }}" class="btn btn-xs btn-outline-gray" title="Download .txt"><i class="bi bi-download"></i></a>
+            </div>
             {% else %}—{% endif %}
           </td>
         </tr>

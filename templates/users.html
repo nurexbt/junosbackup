@@ -1,0 +1,462 @@
+{% extends 'base.html' %}
+{% block title %}User Manager – Juniper CM{% endblock %}
+{% block page_label %}<i class="bi bi-people mr-2 text-blue-500"></i>User Manager{% endblock %}
+
+{% block topbar_right %}
+{% if current_user.role in ('super_admin', 'admin') %}
+<button class="btn btn-sm btn-primary" onclick="openAddModal()">
+  <i class="bi bi-person-plus"></i> Add User
+</button>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Stats row ── -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-7">
+  <div class="stat-gradient-blue rounded-2xl p-5 text-white shadow-md">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest opacity-80">Total Users</span>
+      <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(255,255,255,.15);">
+        <i class="bi bi-people text-base"></i>
+      </span>
+    </div>
+    <div class="text-4xl font-bold">{{ users|length }}</div>
+    <div class="text-xs opacity-60 mt-1">Registered accounts</div>
+  </div>
+  <div class="stat-gradient-amber rounded-2xl p-5 text-white shadow-md">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest opacity-80">Super Admins</span>
+      <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(255,255,255,.15);">
+        <i class="bi bi-shield-check text-base"></i>
+      </span>
+    </div>
+    <div class="text-4xl font-bold">{{ users|selectattr('role','eq','super_admin')|list|length }}</div>
+    <div class="text-xs opacity-60 mt-1">Full access</div>
+  </div>
+  <div class="stat-gradient-green rounded-2xl p-5 text-white shadow-md">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest opacity-80">Admins</span>
+      <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(255,255,255,.15);">
+        <i class="bi bi-person-check text-base"></i>
+      </span>
+    </div>
+    <div class="text-4xl font-bold">{{ users|selectattr('role','eq','admin')|list|length }}</div>
+    <div class="text-xs opacity-60 mt-1">Admin access</div>
+  </div>
+  <div class="stat-gradient-dark rounded-2xl p-5 text-white shadow-md">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest opacity-80">Read Only</span>
+      <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(255,255,255,.15);">
+        <i class="bi bi-eye text-base"></i>
+      </span>
+    </div>
+    <div class="text-4xl font-bold">{{ users|selectattr('role','eq','read_only')|list|length }}</div>
+    <div class="text-xs opacity-60 mt-1">View only</div>
+  </div>
+</div>
+
+<!-- ── Users Table ── -->
+<div class="card-glass">
+  <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+    <div class="flex items-center gap-2">
+      <i class="bi bi-person-lines-fill text-blue-500"></i>
+      <span class="font-semibold text-slate-700">All Users</span>
+      <span class="badge badge-info">{{ users|length }}</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <input type="text" id="userSearch" class="form-input text-sm" style="width:200px;padding:6px 12px;"
+             placeholder="Search users…" oninput="filterUsers()" />
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full tbl" id="usersTable">
+      <thead>
+        <tr>
+          <th style="width:40px;">#</th>
+          <th>User</th>
+          <th>Username</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Last Login</th>
+          <th>Created</th>
+          <th style="width:110px;"></th>
+        </tr>
+      </thead>
+      <tbody id="usersBody">
+        {% for u in users %}
+        <tr data-username="{{ u.username|lower }}" data-name="{{ (u.display_name or u.username)|lower }}">
+          <td class="text-slate-400 text-xs">{{ loop.index }}</td>
+          <td>
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                   style="background:linear-gradient(135deg,
+                     {% if u.role == 'super_admin' %}#d97706,#f59e0b
+                     {% elif u.role == 'admin' %}#1d4ed8,#38bdf8
+                     {% else %}#475569,#94a3b8{% endif %});">
+                {{ (u.display_name or u.username)[0].upper() }}
+              </div>
+              <div>
+                <div class="font-semibold text-slate-800 text-sm">{{ u.display_name or u.username }}</div>
+                {% if u.id == current_user.id %}
+                <span class="text-xs" style="color:#3b82f6;">(you)</span>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+          <td><code class="text-xs bg-slate-100 rounded px-2 py-0.5 text-slate-600">{{ u.username }}</code></td>
+          <td>
+            <span class="badge
+              {% if u.role == 'super_admin' %}badge-warning
+              {% elif u.role == 'admin' %}badge-info
+              {% else %}badge-neutral{% endif %}">
+              {% if u.role == 'super_admin' %}<i class="bi bi-shield-check"></i>Super Admin
+              {% elif u.role == 'admin' %}<i class="bi bi-person-check"></i>Admin
+              {% else %}<i class="bi bi-eye"></i>Read Only{% endif %}
+            </span>
+          </td>
+          <td>
+            {% if u.is_active %}
+            <span class="badge badge-success"><i class="bi bi-check-circle"></i>Active</span>
+            {% else %}
+            <span class="badge badge-danger"><i class="bi bi-x-circle"></i>Inactive</span>
+            {% endif %}
+          </td>
+          <td class="text-slate-400 text-xs">
+            {% if u.last_login %}{{ u.last_login.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}
+          </td>
+          <td class="text-slate-400 text-xs">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+          <td class="text-right">
+            <div class="flex items-center justify-end gap-1">
+              {# Admin cannot edit/delete Super Admin users #}
+              {% set can_manage = (current_user.role == 'super_admin') or
+                                  (current_user.role == 'admin' and u.role != 'super_admin') %}
+              {% if can_manage and u.id != current_user.id %}
+              <button class="btn btn-xs btn-outline" title="Edit"
+                      onclick="openEditModal({{ u.to_dict()|tojson }})">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button class="btn btn-xs btn-outline-red" title="Delete"
+                      onclick="confirmDelete({{ u.id }}, '{{ u.username }}')">
+                <i class="bi bi-trash"></i>
+              </button>
+              {% elif u.id == current_user.id %}
+              <button class="btn btn-xs btn-outline" title="Edit your profile"
+                      onclick="openEditModal({{ u.to_dict()|tojson }})">
+                <i class="bi bi-pencil"></i>
+              </button>
+              {% else %}
+              <span class="text-xs text-slate-300">—</span>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if not users %}
+    <div class="flex flex-col items-center justify-center py-16 text-slate-400">
+      <i class="bi bi-people text-5xl mb-3 text-slate-300"></i>
+      <p class="text-sm">No users found.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════
+     ADD USER MODAL
+══════════════════════════════════════════════════════ -->
+<div id="addUserModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl stat-gradient-blue flex items-center justify-center">
+          <i class="bi bi-person-plus text-white"></i>
+        </div>
+        <h5 class="font-semibold text-slate-800">Add User</h5>
+      </div>
+      <button onclick="closeAddModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+    <div class="p-6 flex flex-col gap-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Username <span class="text-red-500">*</span></label>
+          <input type="text" id="add_username" class="form-input" placeholder="e.g. jdoe" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Display Name</label>
+          <input type="text" id="add_display_name" class="form-input" placeholder="John Doe" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Password <span class="text-red-500">*</span></label>
+        <div style="position:relative;">
+          <input type="password" id="add_password" class="form-input" placeholder="Set a strong password" style="padding-right:42px;" />
+          <button type="button" onclick="togglePwd('add_password','add_pwd_icon')"
+                  style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1rem;padding:0;">
+            <i id="add_pwd_icon" class="bi bi-eye"></i>
+          </button>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Role <span class="text-red-500">*</span></label>
+        <select id="add_role" class="form-input form-select">
+          <option value="read_only">Read Only</option>
+          <option value="admin">Admin</option>
+          {% if current_user.role == 'super_admin' %}
+          <option value="super_admin">Super Admin</option>
+          {% endif %}
+        </select>
+      </div>
+      <div id="addUserError" class="alert alert-danger hidden"></div>
+    </div>
+    <div class="flex justify-end gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
+      <button onclick="closeAddModal()" class="btn btn-secondary">Cancel</button>
+      <button id="addUserBtn" class="btn btn-primary" onclick="submitAddUser()">
+        <i class="bi bi-person-plus"></i> Create User
+      </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════
+     EDIT USER MODAL
+══════════════════════════════════════════════════════ -->
+<div id="editUserModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl stat-gradient-blue flex items-center justify-center">
+          <i class="bi bi-pencil-square text-white"></i>
+        </div>
+        <h5 class="font-semibold text-slate-800">Edit User</h5>
+      </div>
+      <button onclick="closeEditModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+    <div class="p-6 flex flex-col gap-4">
+      <input type="hidden" id="edit_user_id" />
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Username <span class="text-red-500">*</span></label>
+          <input type="text" id="edit_username" class="form-input" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Display Name</label>
+          <input type="text" id="edit_display_name" class="form-input" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">New Password <span class="text-slate-400 normal-case">(leave blank to keep current)</span></label>
+        <div style="position:relative;">
+          <input type="password" id="edit_password" class="form-input" placeholder="Leave blank to keep current" style="padding-right:42px;" />
+          <button type="button" onclick="togglePwd('edit_password','edit_pwd_icon')"
+                  style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1rem;padding:0;">
+            <i id="edit_pwd_icon" class="bi bi-eye"></i>
+          </button>
+        </div>
+      </div>
+      <div id="edit_role_wrap">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Role</label>
+        <select id="edit_role" class="form-input form-select">
+          <option value="read_only">Read Only</option>
+          <option value="admin">Admin</option>
+          {% if current_user.role == 'super_admin' %}
+          <option value="super_admin">Super Admin</option>
+          {% endif %}
+        </select>
+      </div>
+      <div id="edit_status_wrap">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Status</label>
+        <select id="edit_is_active" class="form-input form-select">
+          <option value="1">Active</option>
+          <option value="0">Inactive</option>
+        </select>
+      </div>
+      <div id="editUserError" class="alert alert-danger hidden"></div>
+    </div>
+    <div class="flex justify-end gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
+      <button onclick="closeEditModal()" class="btn btn-secondary">Cancel</button>
+      <button id="editUserBtn" class="btn btn-primary" onclick="submitEditUser()">
+        <i class="bi bi-save"></i> Save Changes
+      </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════
+     DELETE CONFIRM MODAL
+══════════════════════════════════════════════════════ -->
+<div id="deleteUserModal" class="modal-overlay hidden">
+  <div class="modal-box" style="max-width:400px;">
+    <div class="p-6 text-center">
+      <div class="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+        <i class="bi bi-person-x text-red-500 text-2xl"></i>
+      </div>
+      <h5 class="font-bold text-slate-800 text-lg mb-2">Delete User</h5>
+      <p class="text-slate-500 text-sm mb-6">Are you sure you want to delete user <strong id="deleteUserName"></strong>? This action cannot be undone.</p>
+      <div id="deleteUserError" class="alert alert-danger hidden mb-4"></div>
+      <div class="flex justify-center gap-3">
+        <button onclick="closeDeleteModal()" class="btn btn-secondary">Cancel</button>
+        <button id="deleteUserBtn" class="btn btn-danger" onclick="submitDeleteUser()">
+          <i class="bi bi-trash"></i> Delete
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CURRENT_USER_ROLE = '{{ current_user.role }}';
+const CURRENT_USER_ID   = {{ current_user.id }};
+
+// ── Search ────────────────────────────────────────────────────────────────────
+function filterUsers() {
+  const q = document.getElementById('userSearch').value.toLowerCase().trim();
+  document.querySelectorAll('#usersBody tr').forEach(row => {
+    const username = row.dataset.username || '';
+    const name     = row.dataset.name || '';
+    row.style.display = (!q || username.includes(q) || name.includes(q)) ? '' : 'none';
+  });
+}
+
+// ── Toggle password visibility ────────────────────────────────────────────────
+function togglePwd(inputId, iconId) {
+  const inp  = document.getElementById(inputId);
+  const icon = document.getElementById(iconId);
+  inp.type   = inp.type === 'password' ? 'text' : 'password';
+  icon.className = inp.type === 'password' ? 'bi bi-eye' : 'bi bi-eye-slash';
+}
+
+// ── Show / hide error ─────────────────────────────────────────────────────────
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  el.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${msg}`;
+  el.classList.remove('hidden');
+}
+function hideErr(id) { document.getElementById(id).classList.add('hidden'); }
+
+// ── ADD Modal ─────────────────────────────────────────────────────────────────
+function openAddModal() {
+  document.getElementById('add_username').value     = '';
+  document.getElementById('add_display_name').value = '';
+  document.getElementById('add_password').value     = '';
+  document.getElementById('add_role').value         = 'read_only';
+  hideErr('addUserError');
+  document.getElementById('addUserModal').classList.remove('hidden');
+}
+function closeAddModal() { document.getElementById('addUserModal').classList.add('hidden'); }
+
+async function submitAddUser() {
+  hideErr('addUserError');
+  const btn = document.getElementById('addUserBtn');
+  const payload = {
+    username:     document.getElementById('add_username').value.trim(),
+    display_name: document.getElementById('add_display_name').value.trim(),
+    password:     document.getElementById('add_password').value,
+    role:         document.getElementById('add_role').value,
+  };
+  if (!payload.username || !payload.password) {
+    return showErr('addUserError', 'Username and password are required.');
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"><i class="bi bi-arrow-repeat"></i></span> Creating…';
+  try {
+    const res  = await fetch('/api/users', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (res.ok) { location.reload(); }
+    else { showErr('addUserError', data.error || 'Failed to create user.'); }
+  } catch(e) { showErr('addUserError', 'Network error.'); }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-person-plus"></i> Create User'; }
+}
+
+// ── EDIT Modal ────────────────────────────────────────────────────────────────
+function openEditModal(user) {
+  document.getElementById('edit_user_id').value      = user.id;
+  document.getElementById('edit_username').value     = user.username;
+  document.getElementById('edit_display_name').value = user.display_name || '';
+  document.getElementById('edit_password').value     = '';
+  document.getElementById('edit_role').value         = user.role;
+  document.getElementById('edit_is_active').value    = user.is_active ? '1' : '0';
+
+  // Hide role/status if editing self (can't change your own role)
+  const isSelf = (user.id === CURRENT_USER_ID);
+  document.getElementById('edit_role_wrap').style.display   = isSelf ? 'none' : '';
+  document.getElementById('edit_status_wrap').style.display = isSelf ? 'none' : '';
+
+  hideErr('editUserError');
+  document.getElementById('editUserModal').classList.remove('hidden');
+}
+function closeEditModal() { document.getElementById('editUserModal').classList.add('hidden'); }
+
+async function submitEditUser() {
+  hideErr('editUserError');
+  const btn    = document.getElementById('editUserBtn');
+  const userId = document.getElementById('edit_user_id').value;
+  const isSelf = (parseInt(userId) === CURRENT_USER_ID);
+  const payload = {
+    username:     document.getElementById('edit_username').value.trim(),
+    display_name: document.getElementById('edit_display_name').value.trim(),
+  };
+  const pwd = document.getElementById('edit_password').value;
+  if (pwd) payload.password = pwd;
+  if (!isSelf) {
+    payload.role      = document.getElementById('edit_role').value;
+    payload.is_active = document.getElementById('edit_is_active').value === '1';
+  }
+  if (!payload.username) return showErr('editUserError', 'Username cannot be empty.');
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"><i class="bi bi-arrow-repeat"></i></span> Saving…';
+  try {
+    const res  = await fetch(`/api/users/${userId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (res.ok) { location.reload(); }
+    else { showErr('editUserError', data.error || 'Failed to update user.'); }
+  } catch(e) { showErr('editUserError', 'Network error.'); }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-save"></i> Save Changes'; }
+}
+
+// ── DELETE Modal ──────────────────────────────────────────────────────────────
+let _deleteUserId = null;
+function confirmDelete(userId, username) {
+  _deleteUserId = userId;
+  document.getElementById('deleteUserName').textContent = username;
+  hideErr('deleteUserError');
+  document.getElementById('deleteUserModal').classList.remove('hidden');
+}
+function closeDeleteModal() { document.getElementById('deleteUserModal').classList.add('hidden'); _deleteUserId = null; }
+
+async function submitDeleteUser() {
+  if (!_deleteUserId) return;
+  hideErr('deleteUserError');
+  const btn = document.getElementById('deleteUserBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"><i class="bi bi-arrow-repeat"></i></span> Deleting…';
+  try {
+    const res  = await fetch(`/api/users/${_deleteUserId}`, { method:'DELETE' });
+    const data = await res.json();
+    if (res.ok) { location.reload(); }
+    else { showErr('deleteUserError', data.error || 'Failed to delete user.'); }
+  } catch(e) { showErr('deleteUserError', 'Network error.'); }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-trash"></i> Delete'; }
+}
+
+// Close modals on overlay click
+['addUserModal','editUserModal','deleteUserModal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', function(e) {
+    if (e.target === this) this.classList.add('hidden');
+  });
+});
+</script>
+{% endblock %}

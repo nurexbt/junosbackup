@@ -207,7 +207,7 @@
 <body class="bg-slate-100 min-h-screen flex">
 
   <!-- ── Sidebar ── -->
-  <nav class="flex flex-col" style="width:230px;min-width:230px;background:#0f172a;min-height:100vh;padding:20px 12px;border-right:1px solid #1e293b;">
+  <nav class="flex flex-col" style="position:fixed;top:0;left:0;bottom:0;width:230px;background:#0f172a;padding:20px 12px;border-right:1px solid #1e293b;overflow-y:auto;z-index:50;">
     <!-- Brand -->
     <div class="mb-7 px-2 flex items-center gap-3">
       <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:linear-gradient(135deg,#1d4ed8,#38bdf8);">
@@ -233,10 +233,49 @@
       <a class="nav-link {% if request.endpoint == 'collect_page' %}active{% endif %}" href="{{ url_for('collect_page') }}">
         <i class="bi bi-cloud-download"></i> Collection
       </a>
+
+      {% if current_user.is_authenticated and current_user.role in ('super_admin', 'admin') %}
+      <div class="mt-2 mb-1 px-2">
+        <span class="text-xs font-semibold uppercase tracking-widest" style="color:#334155;">Administration</span>
+      </div>
+      <a class="nav-link {% if request.endpoint == 'user_manager' %}active{% endif %}" href="{{ url_for('user_manager') }}">
+        <i class="bi bi-people"></i> User Manager
+      </a>
+      {% endif %}
     </div>
 
+    <!-- User profile + logout -->
+    {% if current_user.is_authenticated %}
+    <div class="mt-4 mb-2 mx-1 rounded-xl p-3" style="background:#1e293b;">
+      <div class="flex items-center gap-2 mb-2">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
+             style="background:linear-gradient(135deg,#1d4ed8,#38bdf8);">
+          {{ (current_user.display_name or current_user.username)[0].upper() }}
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="text-white text-xs font-semibold truncate">{{ current_user.display_name or current_user.username }}</div>
+          <div class="text-xs truncate" style="color:
+            {% if current_user.role == 'super_admin' %}#f59e0b
+            {% elif current_user.role == 'admin' %}#38bdf8
+            {% else %}#94a3b8{% endif %};">
+            {% if current_user.role == 'super_admin' %}Super Admin
+            {% elif current_user.role == 'admin' %}Admin
+            {% else %}Read Only{% endif %}
+          </div>
+        </div>
+      </div>
+      <a href="{{ url_for('logout') }}"
+         class="flex items-center gap-2 text-xs rounded-lg px-2 py-1.5 transition-colors"
+         style="color:#94a3b8;"
+         onmouseover="this.style.background='#0f172a';this.style.color='#e2e8f0';"
+         onmouseout="this.style.background='transparent';this.style.color='#94a3b8';">
+        <i class="bi bi-box-arrow-right"></i> Sign Out
+      </a>
+    </div>
+    {% endif %}
+
     <!-- Footer date -->
-    <div class="px-2 pt-4" style="border-top:1px solid #1e293b;">
+    <div class="px-2 pt-3" style="border-top:1px solid #1e293b;">
       <div class="text-xs" style="color:#475569;">
         <i class="bi bi-calendar3 me-1"></i>{{ now.strftime('%b %d, %Y') if now else '' }}
       </div>
@@ -245,7 +284,7 @@
   </nav>
 
   <!-- ── Main area ── -->
-  <main class="flex-1 flex flex-col min-w-0" style="background:#f1f5f9;">
+  <main class="flex-1 flex flex-col min-w-0" style="background:#f1f5f9;margin-left:230px;">
     <!-- Top bar -->
     <header style="background:#fff;border-bottom:1px solid #e2e8f0;padding:12px 28px;display:flex;align-items:center;gap:12px;min-height:56px;">
       <div class="flex-1">

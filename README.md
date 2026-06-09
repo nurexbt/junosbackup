@@ -1,16 +1,42 @@
 # Juniper Config Manager
 
-A web application for collecting, storing, and managing Juniper network device configurations via SSH. Supports manual and scheduled automatic backups, config diff comparison, and a full REST API.
+A web application for collecting, storing, and managing Juniper network device configurations via SSH. Supports manual and scheduled automatic backups, config diff comparison, role-based user management, and a full REST API.
 
 ## Features
 
+- **Login system** – username/password authentication with session management
+- **Role-based access control** – Super Admin, Admin, and Read Only roles
+- **User Manager** – add, edit, and deactivate users from the sidebar
 - **Device inventory** – add/edit/delete Juniper devices (hostname, IP, model, location)
 - **SSH collection** – pull `show configuration | display set` directly from devices
 - **Scheduled backups** – daily automatic collection via APScheduler (default 02:00 Asia/Dhaka)
-- **Config viewer** – syntax-highlighted view with copy and download buttons
+- **Config viewer** – full config view with copy and download buttons
 - **Config diff** – unified diff between any two snapshots (same or different devices)
 - **Encrypted credentials** – SSH passwords stored with Fernet symmetric encryption
 - **REST API** – full JSON API for automation and scripting
+
+---
+
+## Default Login
+
+| Username | Password | Role |
+|----------|----------|------|
+| `teamzero` | `123456` | Super Admin |
+
+The default user is created automatically on first run if no users exist. **Change the password after first login.**
+
+---
+
+## User Roles
+
+| Permission | Super Admin | Admin | Read Only |
+|---|:---:|:---:|:---:|
+| View dashboard, devices, configs, diff | ✅ | ✅ | ✅ |
+| Add / edit / delete devices | ✅ | ✅ | ❌ |
+| Run SSH collection | ✅ | ✅ | ❌ |
+| View User Manager page | ✅ | ✅ | ❌ |
+| Add / edit / delete Admin & Read Only users | ✅ | ✅ | ❌ |
+| Add / edit / delete Super Admin users | ✅ | ❌ | ❌ |
 
 ---
 
@@ -38,7 +64,7 @@ git clone <your-repo-url> juniper-config-manager
 cd juniper-config-manager
 ```
 
-Or if you have a zip archive, extract it and enter the directory:
+Or extract from a zip archive:
 
 ```bash
 unzip juniper-config-manager.zip
@@ -64,14 +90,13 @@ Your prompt should now show `(venv)`.
 pip install -r requirements.txt
 ```
 
-This installs:
-
 | Package | Version | Purpose |
 |---|---|---|
 | Flask | 3.0.3 | Web framework |
 | Flask-SQLAlchemy | 3.1.1 | ORM / database layer |
+| Flask-Login | 0.6.3 | Session-based authentication |
 | SQLAlchemy | 2.0.30 | SQL toolkit |
-| Werkzeug | 3.0.3 | WSGI utilities |
+| Werkzeug | 3.0.3 | Password hashing, WSGI utilities |
 | paramiko | 3.4.0 | SSH client |
 | APScheduler | 3.10.4 | Background job scheduler |
 | cryptography | 42.0.8 | Fernet password encryption |
@@ -137,6 +162,7 @@ python app.py
 Expected output:
 
 ```
+Default user "teamzero" created (role: super_admin)   ← first run only
 Scheduler started – daily at 02:00 Asia/Dhaka | next run: ...
  * Serving Flask app 'app'
  * Running on all addresses (0.0.0.0)
@@ -144,7 +170,9 @@ Scheduler started – daily at 02:00 Asia/Dhaka | next run: ...
  * Running on http://<your-server-ip>:5000
 ```
 
-Open **http://localhost:5000** in your browser.
+Open **http://localhost:5000** in your browser. You will be redirected to the login page.
+
+Sign in with `teamzero` / `123456`, then go to **User Manager** in the sidebar to create your team accounts.
 
 ---
 
@@ -240,38 +268,108 @@ The app is now accessible on port 80.
 
 ---
 
+## Installation on Windows
+
+### 1. System requirements
+
+- Python 3.11+ from [python.org](https://www.python.org/downloads/) — check **"Add Python to PATH"** during install
+- Git (optional) from [git-scm.com](https://git-scm.com)
+
+Verify:
+
+```cmd
+python --version
+```
+
+---
+
+### 2. Get the project
+
+Clone or extract the project folder, then open a terminal in that directory.
+
+---
+
+### 3. Create a virtual environment
+
+```cmd
+python -m venv venv
+venv\Scripts\activate
+```
+
+Your prompt should now show `(venv)`.
+
+---
+
+### 4. Install dependencies
+
+```cmd
+pip install -r requirements.txt
+```
+
+---
+
+### 5. Generate the Fernet key
+
+```cmd
+python -c "from cryptography.fernet import Fernet; open('.fernet_key','wb').write(Fernet.generate_key()); print('Key generated.')"
+```
+
+---
+
+### 6. Run the application
+
+```cmd
+venv\Scripts\python app.py
+```
+
+Open **http://localhost:5000** in your browser.
+
+---
+
 ## REST API Reference
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/devices` | List all devices |
-| POST | `/api/devices` | Create a device |
-| PUT | `/api/devices/<id>` | Update a device |
-| DELETE | `/api/devices/<id>` | Delete a device and its configs |
-| GET | `/api/configs?device_id=<id>` | List configs (optionally filtered) |
-| POST | `/api/configs` | Store a new config snapshot |
-| GET | `/api/configs/<id>` | Get a config with full content |
-| DELETE | `/api/configs/<id>` | Delete a config snapshot |
-| GET | `/api/configs/diff?id1=<id>&id2=<id>` | Unified diff between two configs |
-| GET | `/api/devices/<id>/configs` | All configs for a device |
-| POST | `/api/collect/manual/<device_id>` | Trigger manual SSH backup |
-| POST | `/api/collect/run` | Run collection on all SSH-enabled devices |
-| GET | `/api/collect/logs` | View collection logs |
-| POST | `/api/collect/schedule` | Update the daily schedule time |
+All API endpoints require an active login session. Unauthenticated requests are redirected to `/login`.
 
-### Example: add a device and store a config
+### Devices
 
-```bash
-# Add a device
-curl -X POST http://localhost:5000/api/devices \
-  -H "Content-Type: application/json" \
-  -d '{"hostname":"router-01","ip_address":"10.0.0.1","model":"MX480","location":"DC-1"}'
+| Method | Endpoint | Role required | Description |
+|--------|----------|---------------|-------------|
+| GET | `/api/devices` | Any | List all devices |
+| POST | `/api/devices` | Admin+ | Create a device |
+| PUT | `/api/devices/<id>` | Admin+ | Update a device |
+| DELETE | `/api/devices/<id>` | Admin+ | Delete a device and its configs |
 
-# Store a config snapshot
-curl -X POST http://localhost:5000/api/configs \
-  -H "Content-Type: application/json" \
-  -d '{"device_id":1,"note":"daily backup","content":"set system host-name router-01\n..."}'
-```
+### Configs
+
+| Method | Endpoint | Role required | Description |
+|--------|----------|---------------|-------------|
+| GET | `/api/configs?device_id=<id>` | Any | List configs (optionally filtered) |
+| POST | `/api/configs` | Admin+ | Store a new config snapshot |
+| GET | `/api/configs/<id>` | Any | Get a config with full content |
+| DELETE | `/api/configs/<id>` | Admin+ | Delete a config snapshot |
+| GET | `/api/configs/diff?id1=<id>&id2=<id>` | Any | Unified diff between two configs |
+| GET | `/api/devices/<id>/configs` | Any | All configs for a device |
+
+### Collection
+
+| Method | Endpoint | Role required | Description |
+|--------|----------|---------------|-------------|
+| POST | `/api/collect/manual/<device_id>` | Admin+ | Trigger manual SSH backup |
+| POST | `/api/collect/run` | Admin+ | Run collection on all SSH-enabled devices |
+| GET | `/api/collect/logs` | Any | View collection logs |
+| POST | `/api/collect/schedule` | Admin+ | Update the daily schedule time |
+| POST | `/api/collect/trigger` | Admin+ | Fire the scheduled job immediately |
+
+### Users
+
+| Method | Endpoint | Role required | Description |
+|--------|----------|---------------|-------------|
+| GET | `/api/users` | Admin+ | List all users |
+| POST | `/api/users` | Admin+ | Create a user |
+| PUT | `/api/users/<id>` | Admin+ | Update a user |
+| DELETE | `/api/users/<id>` | Admin+ | Delete a user |
+
+> **Admin+** = Admin or Super Admin. Admins cannot create, edit, or delete Super Admin accounts.
 
 ---
 
@@ -279,7 +377,7 @@ curl -X POST http://localhost:5000/api/configs \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SECRET_KEY` | `change-me-in-production` | Flask session secret key |
+| `SECRET_KEY` | `change-me-in-production` | Flask session secret / Fernet key seed |
 | `DATABASE_URL` | `sqlite:///juniper_configs.db` | SQLAlchemy database URI |
 
 ---
@@ -288,7 +386,7 @@ curl -X POST http://localhost:5000/api/configs \
 
 ```
 juniper-config-manager/
-├── app.py              # Flask app, routes, models
+├── app.py              # Flask app, routes, models, auth
 ├── collector.py        # SSH collection and APScheduler logic
 ├── crypto_utils.py     # Fernet encrypt/decrypt helpers
 ├── migrate_db.py       # DB migration helper
@@ -297,14 +395,17 @@ juniper-config-manager/
 ├── .fernet_key         # Encryption key (do NOT commit)
 ├── instance/
 │   └── juniper_configs.db   # SQLite database (auto-created)
-└── templates/          # Jinja2 HTML templates
-    ├── base.html
-    ├── index.html
-    ├── devices.html
+└── templates/
+    ├── base.html        # Sidebar layout, nav, user card
+    ├── login.html       # Login page
+    ├── 403.html         # Forbidden error page
+    ├── index.html       # Dashboard
+    ├── devices.html     # Device list
     ├── device_detail.html
     ├── config_view.html
-    ├── collect.html
-    └── diff.html
+    ├── collect.html     # Collection manager
+    ├── diff.html        # Config diff
+    └── users.html       # User Manager
 ```
 
 ---
@@ -318,3 +419,5 @@ source venv/bin/activate
 pip install -r requirements.txt
 sudo systemctl restart juniper-config-manager
 ```
+
+> The database schema is updated automatically on startup via `db.create_all()`. New tables (e.g. `user`) are added without touching existing data.

@@ -151,6 +151,8 @@
 .card-act-btn.view:hover { background: #dbeafe; }
 .card-act-btn.backup { background: #f0fdf4; color: #15803d; }
 .card-act-btn.backup:hover { background: #dcfce7; }
+.card-act-btn.edit { width: 34px; flex: 0 0 34px; background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 9px; }
+.card-act-btn.edit:hover { background: #fef3c7; }
 .card-act-btn.del { width: 34px; flex: 0 0 34px; background: #fff5f5; color: #dc2626; border: 1px solid #fee2e2; border-radius: 9px; }
 .card-act-btn.del:hover { background: #fee2e2; }
 
@@ -365,6 +367,17 @@
          {% if not d.ssh_enabled %}style="opacity:.4;pointer-events:none;cursor:not-allowed;"{% endif %}>
         <i class="bi bi-cloud-download"></i>Collect
       </a>
+      <button class="card-act-btn edit"
+              data-tip="Edit device"
+              data-id="{{ d.id }}"
+              data-hostname="{{ d.hostname | e }}"
+              data-ip="{{ d.ip_address | e }}"
+              data-model="{{ (d.model or '') | e }}"
+              data-location="{{ (d.location or '') | e }}"
+              data-desc="{{ (d.description or '') | e }}"
+              onclick="openEditModal(this)">
+        <i class="bi bi-pencil"></i>
+      </button>
       <button onclick="deleteDevice({{ d.id }}, '{{ d.hostname }}')" class="card-act-btn del" data-tip="Delete device">
         <i class="bi bi-trash3"></i>
       </button>
@@ -396,6 +409,59 @@
   <p style="font-size:.85rem;margin-top:4px;">Try a different hostname, IP, or model.</p>
 </div>
 
+
+<!-- ══════════════════════════════════════════════════════════
+     EDIT DEVICE MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="editDeviceModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:linear-gradient(135deg,#f59e0b,#fbbf24);">
+          <i class="bi bi-pencil text-white"></i>
+        </div>
+        <div>
+          <h5 class="font-semibold text-slate-800 leading-tight">Edit Device</h5>
+          <p class="text-xs text-slate-400" id="editDeviceSubtitle"></p>
+        </div>
+      </div>
+      <button onclick="document.getElementById('editDeviceModal').classList.add('hidden')"
+              class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+    <div class="p-6 flex flex-col gap-4">
+      <input type="hidden" id="edit_device_id" />
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Hostname <span class="text-red-500">*</span></label>
+        <input type="text" id="edit_hostname" class="form-input" placeholder="router-01" />
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">IP Address <span class="text-red-500">*</span></label>
+        <input type="text" id="edit_ip" class="form-input" placeholder="192.168.1.1" />
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Model</label>
+          <input type="text" id="edit_model" class="form-input" placeholder="MX480" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Location</label>
+          <input type="text" id="edit_location" class="form-input" placeholder="DC-1 Rack 3" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Description</label>
+        <textarea id="edit_desc" class="form-input" rows="2" placeholder="Optional description…"></textarea>
+      </div>
+      <div id="editDeviceError" class="alert alert-danger hidden"></div>
+    </div>
+    <div class="flex justify-end gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
+      <button onclick="document.getElementById('editDeviceModal').classList.add('hidden')" class="btn btn-secondary">Cancel</button>
+      <button id="saveEditBtn" class="btn btn-primary"><i class="bi bi-check-lg"></i>Save Changes</button>
+    </div>
+  </div>
+</div>
 
 <!-- ══════════════════════════════════════════════════════════
      ADD DEVICE MODAL
@@ -450,6 +516,52 @@
 
 {% block scripts %}
 <script>
+// ── Edit device ───────────────────────────────────────────────────────────────
+function openEditModal(btn) {
+  const d = btn.dataset;
+  document.getElementById('edit_device_id').value      = d.id;
+  document.getElementById('edit_hostname').value       = d.hostname;
+  document.getElementById('edit_ip').value             = d.ip;
+  document.getElementById('edit_model').value          = d.model;
+  document.getElementById('edit_location').value       = d.location;
+  document.getElementById('edit_desc').value           = d.desc;
+  document.getElementById('editDeviceSubtitle').textContent = d.hostname;
+  document.getElementById('editDeviceError').classList.add('hidden');
+  document.getElementById('editDeviceModal').classList.remove('hidden');
+}
+
+document.getElementById('saveEditBtn').addEventListener('click', async () => {
+  const errEl = document.getElementById('editDeviceError');
+  errEl.classList.add('hidden');
+  const id = document.getElementById('edit_device_id').value;
+  const payload = {
+    hostname:    document.getElementById('edit_hostname').value.trim(),
+    ip_address:  document.getElementById('edit_ip').value.trim(),
+    model:       document.getElementById('edit_model').value.trim(),
+    location:    document.getElementById('edit_location').value.trim(),
+    description: document.getElementById('edit_desc').value.trim(),
+  };
+  if (!payload.hostname || !payload.ip_address) {
+    errEl.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Hostname and IP address are required.';
+    errEl.classList.remove('hidden'); return;
+  }
+  const btn = document.getElementById('saveEditBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="bi bi-arrow-repeat spin mr-1"></span>Saving…';
+  const res = await fetch(`/api/devices/${id}`, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+  });
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-check-lg"></i>Save Changes';
+  if (res.ok) {
+    location.reload();
+  } else {
+    const data = await res.json();
+    errEl.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${data.error || 'Failed to update device.'}`;
+    errEl.classList.remove('hidden');
+  }
+});
+
 // ── Add device ────────────────────────────────────────────────────────────────
 document.getElementById('saveDeviceBtn').addEventListener('click', async () => {
   const errEl = document.getElementById('addDeviceError');
@@ -530,6 +642,9 @@ function filterCards() {
 
 // Close modal on overlay click
 document.getElementById('addDeviceModal').addEventListener('click', function(e) {
+  if (e.target === this) this.classList.add('hidden');
+});
+document.getElementById('editDeviceModal').addEventListener('click', function(e) {
   if (e.target === this) this.classList.add('hidden');
 });
 </script>
