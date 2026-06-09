@@ -1,0 +1,816 @@
+{% extends 'base.html' %}
+{% block title %}Collection – Juniper CM{% endblock %}
+{% block page_label %}<i class="bi bi-cloud-download mr-2 text-blue-500"></i>Config Collection{% endblock %}
+
+{% block topbar_right %}
+<button onclick="openWizard(null, 'All Devices')" class="btn btn-sm btn-success">
+  <i class="bi bi-play-fill"></i>Collect All Now
+</button>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Schedule Card ── -->
+<div class="card-glass mb-6">
+  <div class="flex items-center gap-2 px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+    <i class="bi bi-clock text-blue-500"></i>
+    <span class="font-semibold text-slate-700">Daily Schedule</span>
+    <span class="badge {% if schedule.running %}badge-success{% else %}badge-neutral{% endif %}">
+      <i class="bi bi-{% if schedule.running %}circle-fill{% else %}circle{% endif %} text-xs"></i>
+      {% if schedule.running %}Running{% else %}Stopped{% endif %}
+    </span>
+  </div>
+  <div class="px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
+    <div class="flex-1">
+      <div class="text-sm text-slate-600">
+        Runs every day at <strong id="scheduleDisplay" class="text-slate-800">{{ schedule.time }}</strong>
+        <span class="text-slate-400 text-xs ml-1">(Asia/Dhaka)</span>
+        {% if schedule.next_run %}
+        <span class="ml-2 text-slate-400 text-xs">· Next: <strong class="text-slate-600">{{ schedule.next_run }}</strong></span>
+        {% endif %}
+      </div>
+      <div class="text-xs text-slate-400 mt-1.5 flex items-center gap-1.5">
+        <i class="bi bi-info-circle"></i>
+        Connects to every SSH-enabled device and runs
+        <code class="bg-slate-100 rounded px-1.5 py-0.5 text-slate-600">show configuration | display set | no-more</code>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <input type="time" id="scheduleTime" class="form-input" value="{{ schedule.time }}" style="width:140px;" />
+      <button onclick="saveSchedule()" class="btn btn-sm btn-outline" id="saveScheduleBtn">
+        <i class="bi bi-check-lg"></i>Save
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Devices Table ── -->
+<div class="card-glass mb-6">
+  <div class="px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <i class="bi bi-hdd-network text-blue-500"></i>
+        <span class="font-semibold text-slate-700">Devices</span>
+        <span class="text-xs text-slate-400">· Click ▶ to collect</span>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <select id="devSshFilter" class="form-input form-select" style="width:140px;" onchange="devApplyFilters()">
+        <option value="">All SSH</option>
+        <option value="enabled">Enabled</option>
+        <option value="disabled">Disabled</option>
+      </select>
+      <select id="devStatusFilter" class="form-input form-select" style="width:150px;" onchange="devApplyFilters()">
+        <option value="">All Status</option>
+        <option value="success">Success</option>
+        <option value="failed">Failed</option>
+        <option value="never">Never</option>
+      </select>
+      <div class="flex-1 flex items-center" style="min-width:200px;max-width:320px;">
+        <div class="relative w-full">
+          <i class="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+          <input type="text" id="devSearch" class="form-input pl-8" placeholder="Search hostname / IP…" oninput="devApplyFilters()" />
+        </div>
+        <button onclick="document.getElementById('devSearch').value='';devApplyFilters();" class="ml-1 btn btn-xs btn-outline-gray"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full tbl" id="devTable">
+      <thead>
+        <tr>
+          <th class="sortable" data-col="0">Hostname <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
+          <th class="sortable" data-col="1">IP Address <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
+          <th>SSH User</th>
+          <th class="sortable" data-col="3">Port <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
+          <th>SSH</th>
+          <th class="sortable" data-col="5">Last Collected <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="devTbody">
+        {% for d in devices %}
+        {% set last = d.collect_logs|sort(attribute='run_at')|last if d.collect_logs else none %}
+        <tr id="row-{{ d.id }}"
+            data-hostname="{{ d.hostname|lower }}"
+            data-ip="{{ d.ip_address }}"
+            data-ssh="{{ 'enabled' if d.ssh_enabled else 'disabled' }}"
+            data-last-status="{{ last.status if last else 'never' }}"
+            data-last-dt="{{ last.run_at.strftime('%Y-%m-%d %H:%M') if last else '' }}">
+          <td>
+            <a href="{{ url_for('device_detail', device_id=d.id) }}" class="font-semibold text-blue-600 hover:underline flex items-center gap-2 text-sm">
+              <i class="bi bi-router text-blue-400 text-xs"></i>{{ d.hostname }}
+            </a>
+          </td>
+          <td><code class="text-xs bg-slate-100 rounded px-2 py-0.5 text-slate-600">{{ d.ip_address }}</code></td>
+          <td class="text-slate-500 text-sm">{{ d.ssh_username or '—' }}</td>
+          <td class="text-slate-500 text-sm">{{ d.ssh_port or 22 }}</td>
+          <td>
+            {% if d.ssh_enabled %}
+              <span class="badge badge-success"><i class="bi bi-check-circle"></i>Enabled</span>
+            {% else %}
+              <span class="badge badge-neutral"><i class="bi bi-dash-circle"></i>Disabled</span>
+            {% endif %}
+          </td>
+          <td class="text-sm">
+            {% if last %}
+              <span class="badge {% if last.status == 'success' %}badge-success{% elif last.status == 'failed' %}badge-danger{% else %}badge-neutral{% endif %}">
+                {{ last.status }}
+              </span>
+              <span class="text-slate-400 text-xs ml-1">{{ last.run_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            {% else %}
+              <span class="text-slate-400 text-xs">Never</span>
+            {% endif %}
+          </td>
+          <td class="text-right">
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn btn-xs btn-outline" title="Collect now"
+                onclick="openWizard({{ d.id }}, '{{ d.hostname }}')"
+                {% if not d.ssh_enabled %}disabled title="SSH not enabled"{% endif %}>
+                <i class="bi bi-play-fill"></i>
+              </button>
+              <button class="btn btn-xs btn-outline-gray" title="SSH credentials"
+                onclick="openCredModal({{ d.id }}, '{{ d.hostname }}', '{{ d.ssh_username or '' }}', {{ d.ssh_port or 22 }}, {{ 'true' if d.ssh_enabled else 'false' }})">
+                <i class="bi bi-key"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr id="devEmptyRow"><td colspan="7" class="text-center text-slate-400 py-8 text-sm">No devices. Add devices first.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Devices pagination -->
+  <div class="flex items-center justify-between px-5 py-3" style="border-top:1px solid #f1f5f9;" id="devPagBar">
+    <span class="text-xs text-slate-400" id="devPagInfo"></span>
+    <div class="flex items-center gap-2">
+      <select class="form-input form-select text-xs" style="width:75px;" id="devPageSize" onchange="devGoPage(1)">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="9999">All</option>
+      </select>
+      <div class="flex items-center gap-1" id="devPagNav"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Collection Log ── -->
+<div class="card-glass">
+  <div class="px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <i class="bi bi-journal-text text-blue-500"></i>
+        <span class="font-semibold text-slate-700">Recent Collection Log</span>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <select id="logStatusFilter" class="form-input form-select" style="width:150px;" onchange="logApplyFilters()">
+        <option value="">All Status</option>
+        <option value="success">Success</option>
+        <option value="failed">Failed</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <div class="flex-1 flex items-center" style="min-width:200px;max-width:320px;">
+        <div class="relative w-full">
+          <i class="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+          <input type="text" id="logSearch" class="form-input pl-8" placeholder="Search device / message…" oninput="logApplyFilters()" />
+        </div>
+        <button onclick="document.getElementById('logSearch').value='';logApplyFilters();" class="ml-1 btn btn-xs btn-outline-gray"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full tbl" id="logTable">
+      <thead>
+        <tr>
+          <th class="sortable" data-col="0">Time <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
+          <th class="sortable" data-col="1">Device <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
+          <th>Status</th>
+          <th>Message</th>
+          <th>Config</th>
+        </tr>
+      </thead>
+      <tbody id="logTbody">
+        {% for log in logs %}
+        <tr data-device="{{ log.device.hostname|lower }}"
+            data-status="{{ log.status }}"
+            data-message="{{ (log.message or '')|lower }}"
+            data-dt="{{ log.run_at.strftime('%Y-%m-%d %H:%M:%S') }}">
+          <td class="text-slate-400 text-xs whitespace-nowrap">{{ log.run_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td>
+            <a href="{{ url_for('device_detail', device_id=log.device_id) }}" class="text-blue-600 hover:underline font-medium text-sm">
+              {{ log.device.hostname }}
+            </a>
+          </td>
+          <td>
+            <span class="badge {% if log.status == 'success' %}badge-success{% elif log.status == 'failed' %}badge-danger{% else %}badge-neutral{% endif %}">
+              <i class="bi bi-{% if log.status == 'success' %}check-circle{% elif log.status == 'failed' %}x-circle{% else %}dash-circle{% endif %}"></i>
+              {{ log.status }}
+            </span>
+          </td>
+          <td class="text-slate-400 text-xs">{{ log.message or '—' }}</td>
+          <td class="whitespace-nowrap">
+            {% if log.config_id %}
+            <div class="flex items-center gap-1">
+              <a href="{{ url_for('config_view', config_id=log.config_id) }}" class="btn btn-xs btn-outline" title="View"><i class="bi bi-eye"></i></a>
+              <a href="{{ url_for('download_config', config_id=log.config_id) }}" class="btn btn-xs btn-outline-gray" title="Download"><i class="bi bi-download"></i></a>
+            </div>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr id="logEmptyRow"><td colspan="5" class="text-center text-slate-400 py-8 text-sm">No collection runs yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Log pagination -->
+  <div class="flex items-center justify-between px-5 py-3" style="border-top:1px solid #f1f5f9;" id="logPagBar">
+    <span class="text-xs text-slate-400" id="logPagInfo"></span>
+    <div class="flex items-center gap-2">
+      <select class="form-input form-select text-xs" style="width:75px;" id="logPageSize" onchange="logGoPage(1)">
+        <option value="10">10</option>
+        <option value="25" selected>25</option>
+        <option value="50">50</option>
+        <option value="9999">All</option>
+      </select>
+      <div class="flex items-center gap-1" id="logPagNav"></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     BACKUP WIZARD MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="backupModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl stat-gradient-blue flex items-center justify-center">
+          <i class="bi bi-cloud-download text-white"></i>
+        </div>
+        <div>
+          <h5 class="font-semibold text-slate-800 leading-tight">Create Backup</h5>
+          <p class="text-xs text-slate-400" id="wizardDeviceName"></p>
+        </div>
+      </div>
+      <button id="backupModalClose" onclick="document.getElementById('backupModal').classList.add('hidden')" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+
+    <div class="p-6">
+      <!-- Note -->
+      <div id="noteSection" class="mb-5">
+        <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Backup note (optional)</label>
+        <input type="text" id="backupNote" class="form-input" placeholder="e.g. manual backup, pre-change snapshot" value="manual backup" />
+      </div>
+
+      <!-- Single device steps -->
+      <div id="singleSteps">
+        <div class="flex items-start gap-3" id="step-login">
+          <div id="icon-login" class="step-icon-wrap step-idle mt-0.5"><i class="bi bi-plug"></i></div>
+          <div class="flex-1">
+            <div class="font-semibold text-sm text-slate-700">Step 1 — Router Login</div>
+            <div id="msg-login" class="text-xs text-slate-400 mt-0.5">SSH connect to device</div>
+          </div>
+        </div>
+        <div class="step-connector ml-4"></div>
+        <div class="flex items-start gap-3" id="step-backup">
+          <div id="icon-backup" class="step-icon-wrap step-skipped mt-0.5"><i class="bi bi-hdd"></i></div>
+          <div class="flex-1">
+            <div class="font-semibold text-sm text-slate-400" id="label-backup">Step 2 — Capture &amp; Save Config</div>
+            <div id="msg-backup" class="text-xs text-slate-400 mt-0.5">Run <code class="bg-slate-100 rounded px-1">show configuration | display set | no-more</code></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- All devices list -->
+      <div id="allSteps" class="hidden">
+        <div class="text-xs text-slate-500 mb-3">Collecting all SSH-enabled devices…</div>
+        <div id="allDeviceList" class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1"></div>
+      </div>
+
+      <!-- Success banner -->
+      <div id="successBanner" class="hidden mt-5">
+        <div class="alert alert-success">
+          <i class="bi bi-check-circle-fill text-lg"></i>
+          <div>
+            <div class="font-semibold" id="successTitle">Backup completed successfully!</div>
+            <div class="text-xs mt-0.5" id="successDetail"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error banner -->
+      <div id="errorBanner" class="hidden mt-5">
+        <div class="alert alert-danger">
+          <i class="bi bi-x-circle-fill text-lg"></i>
+          <div>
+            <div class="font-semibold" id="errorTitle">Backup failed</div>
+            <div class="text-xs mt-0.5" id="errorDetail"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-end items-center gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
+      <button id="cancelBtn" onclick="document.getElementById('backupModal').classList.add('hidden')" class="btn btn-secondary btn-sm">Cancel</button>
+      <button id="startBtn" onclick="startBackup()" class="btn btn-primary btn-sm"><i class="bi bi-play-fill"></i>Start Backup</button>
+      <a href="#" id="viewConfigBtn" class="btn btn-success btn-sm hidden"><i class="bi bi-eye"></i>View Config</a>
+      <button id="doneBtn" onclick="location.reload()" class="btn btn-outline-gray btn-sm hidden"><i class="bi bi-arrow-clockwise"></i>Refresh</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     CREDENTIALS MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="credModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center">
+          <i class="bi bi-key text-amber-600"></i>
+        </div>
+        <div>
+          <h5 class="font-semibold text-slate-800 leading-tight">SSH Credentials</h5>
+          <p class="text-xs text-slate-400" id="credDeviceName"></p>
+        </div>
+      </div>
+      <button onclick="document.getElementById('credModal').classList.add('hidden')" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+    <div class="p-6 flex flex-col gap-4">
+      <input type="hidden" id="credDeviceId" />
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">SSH Username</label>
+        <input type="text" id="credUsername" class="form-input" placeholder="admin" autocomplete="off" />
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">SSH Password</label>
+        <div class="relative">
+          <input type="password" id="credPassword" class="form-input pr-10" placeholder="Leave blank to keep existing" autocomplete="new-password" />
+          <button type="button" onclick="togglePwd()" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+            <i class="bi bi-eye" id="eyeIcon"></i>
+          </button>
+        </div>
+        <p class="text-xs text-slate-400 mt-1">Password is encrypted before storage.</p>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">SSH Port</label>
+        <input type="number" id="credPort" class="form-input" value="22" min="1" max="65535" style="max-width:120px;" />
+      </div>
+      <label class="flex items-center gap-3 cursor-pointer">
+        <div class="relative">
+          <input type="checkbox" id="credEnabled" class="sr-only peer" />
+          <div class="w-10 h-6 bg-slate-200 rounded-full peer-checked:bg-blue-500 transition-colors"></div>
+          <div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4"></div>
+        </div>
+        <span class="text-sm text-slate-700">Enable SSH collection for this device</span>
+      </label>
+      <div id="credError" class="alert alert-danger hidden"></div>
+    </div>
+    <div class="flex justify-end gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
+      <button onclick="document.getElementById('credModal').classList.add('hidden')" class="btn btn-secondary">Cancel</button>
+      <button onclick="saveCredentials()" class="btn btn-primary"><i class="bi bi-save"></i>Save Credentials</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let _currentDeviceId   = null;
+let _currentDeviceName = '';
+
+// ── Wizard ────────────────────────────────────────────────────────────────────
+function openWizard(deviceId, deviceName) {
+  _currentDeviceId   = deviceId;
+  _currentDeviceName = deviceName;
+  resetWizard();
+  document.getElementById('backupModal').classList.remove('hidden');
+}
+
+function resetWizard() {
+  const isAll = (_currentDeviceId === null);
+  document.getElementById('wizardDeviceName').textContent = _currentDeviceName;
+  document.getElementById('noteSection').classList.toggle('hidden', isAll);
+  document.getElementById('backupNote').value = 'manual backup';
+  document.getElementById('singleSteps').classList.toggle('hidden', isAll);
+  document.getElementById('allSteps').classList.toggle('hidden', !isAll);
+  document.getElementById('allDeviceList').innerHTML = '';
+  document.getElementById('successBanner').classList.add('hidden');
+  document.getElementById('errorBanner').classList.add('hidden');
+  document.getElementById('startBtn').classList.remove('hidden');
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('startBtn').innerHTML = '<i class="bi bi-play-fill"></i>Start Backup';
+  document.getElementById('cancelBtn').classList.remove('hidden');
+  document.getElementById('cancelBtn').disabled = false;
+  document.getElementById('cancelBtn').textContent = 'Cancel';
+  document.getElementById('viewConfigBtn').classList.add('hidden');
+  document.getElementById('doneBtn').classList.add('hidden');
+  document.getElementById('backupModalClose').disabled = false;
+  setStepState('login',  'idle');
+  setStepState('backup', 'skipped');
+  setStepMsg('login',  'SSH connect to device', 'text-slate-400');
+  setStepMsg('backup', 'Run <code class="bg-slate-100 rounded px-1">show configuration | display set | no-more</code>', 'text-slate-400');
+  document.getElementById('label-backup').className = 'font-semibold text-sm text-slate-400';
+}
+
+// ── Step helpers ──────────────────────────────────────────────────────────────
+function setStepState(step, state) {
+  const wrap = document.getElementById(`icon-${step}`);
+  const cls  = { idle:'step-idle', running:'step-running', success:'step-success', failed:'step-failed', skipped:'step-skipped' };
+  const icon = {
+    login:  { idle:'bi-plug', running:'bi-arrow-repeat spin', success:'bi-check-lg', failed:'bi-x-lg', skipped:'bi-dash-lg' },
+    backup: { idle:'bi-hdd',  running:'bi-arrow-repeat spin', success:'bi-check-lg', failed:'bi-x-lg', skipped:'bi-dash-lg' },
+  };
+  wrap.className = `step-icon-wrap ${cls[state] || cls.idle} mt-0.5`;
+  wrap.innerHTML = `<i class="bi ${icon[step][state] || icon[step].idle}"></i>`;
+}
+
+function setStepMsg(step, html, cls = 'text-slate-400') {
+  const el = document.getElementById(`msg-${step}`);
+  el.className = `text-xs mt-0.5 ${cls}`;
+  el.innerHTML = html;
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+async function startBackup() {
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('startBtn').innerHTML = '<span class="bi bi-arrow-repeat spin mr-1"></span>Running…';
+  document.getElementById('cancelBtn').disabled = true;
+  document.getElementById('backupModalClose').disabled = true;
+  document.getElementById('noteSection').classList.add('hidden');
+  if (_currentDeviceId === null) { await runCollectAll(); }
+  else { await runSingleDevice(_currentDeviceId); }
+}
+
+// ── Single device ─────────────────────────────────────────────────────────────
+async function runSingleDevice(deviceId) {
+  const note = document.getElementById('backupNote').value.trim() || 'manual backup';
+  setStepState('login', 'running');
+  setStepMsg('login', 'Connecting…', 'text-blue-500');
+
+  let result;
+  try {
+    const res = await fetch(`/api/collect/manual/${deviceId}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ note }),
+    });
+    result = await res.json();
+  } catch (err) {
+    result = { login:{ status:'failed', message:'Network error: '+err.message }, backup:{ status:'skipped' } };
+  }
+
+  const login = result.login || {};
+  if (login.status === 'success') {
+    setStepState('login', 'success');
+    setStepMsg('login', '✓ '+login.message, 'text-green-600');
+  } else {
+    setStepState('login', 'failed');
+    setStepMsg('login', login.message || 'Login failed', 'text-red-500');
+  }
+
+  await sleep(350);
+  const backup = result.backup || {};
+  document.getElementById('label-backup').className = 'font-semibold text-sm text-slate-700';
+
+  if (backup.status === 'success') {
+    setStepState('backup', 'success');
+    setStepMsg('backup', '✓ '+backup.message, 'text-green-600');
+    showSuccess('Backup completed successfully!', `${backup.lines} lines captured and saved.`);
+    if (backup.config_id) {
+      const vb = document.getElementById('viewConfigBtn');
+      vb.href = `/configs/${backup.config_id}`;
+      vb.classList.remove('hidden');
+    }
+  } else if (backup.status === 'skipped') {
+    setStepState('backup', 'skipped');
+    setStepMsg('backup', 'Skipped (login failed)', 'text-slate-400');
+    showError('Login failed', login.message || 'Could not authenticate to the device.');
+  } else {
+    setStepState('backup', 'failed');
+    setStepMsg('backup', backup.message || 'Backup failed', 'text-red-500');
+    showError('Backup failed', backup.message || 'Command execution or save error.');
+  }
+  finishWizard(backup.status === 'success');
+}
+
+// ── Collect all ───────────────────────────────────────────────────────────────
+async function runCollectAll() {
+  const listEl = document.getElementById('allDeviceList');
+  listEl.innerHTML = `<div class="flex items-center gap-2 text-blue-600 text-sm"><span class="bi bi-arrow-repeat spin"></span>Connecting to all SSH-enabled devices…</div>`;
+
+  let data;
+  try {
+    const res = await fetch('/api/collect/run', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    data = await res.json();
+  } catch (err) {
+    listEl.innerHTML = `<div class="text-red-500 text-sm">Network error: ${err.message}</div>`;
+    finishWizard(false); showError('Network error', err.message); return;
+  }
+
+  const results = data.results || [];
+  listEl.innerHTML = '';
+  let ok = 0, fail = 0;
+
+  for (const r of results) {
+    const isOk   = r.status === 'success';
+    const isFail = r.status === 'failed';
+    if (isOk)   ok++;
+    if (isFail) fail++;
+    const iconCls = isOk ? 'step-success' : isFail ? 'step-failed' : 'step-skipped';
+    const biIcon  = isOk ? 'bi-check-lg'  : isFail ? 'bi-x-lg'    : 'bi-dash-lg';
+    listEl.insertAdjacentHTML('beforeend', `
+      <div class="flex items-center gap-3 py-1.5" style="border-bottom:1px solid #f1f5f9;">
+        <div class="step-icon-wrap ${iconCls}" style="width:28px;height:28px;font-size:.75rem;flex-shrink:0;">
+          <i class="bi ${biIcon}"></i>
+        </div>
+        <span class="font-medium text-sm text-slate-700" style="min-width:140px;">${escHtml(r.hostname || '—')}</span>
+        <span class="text-xs text-slate-400">${escHtml(r.message || (isOk ? 'Saved successfully' : ''))}</span>
+      </div>`);
+  }
+
+  if (results.length === 0) {
+    listEl.innerHTML = '<div class="text-slate-400 text-sm">No SSH-enabled devices found.</div>';
+    showError('Nothing to collect', 'No devices have SSH enabled. Set credentials first.');
+    finishWizard(false); return;
+  }
+
+  if (ok > 0) {
+    showSuccess(
+      `Collected ${ok} of ${results.length} device${results.length > 1 ? 's' : ''}`,
+      fail > 0 ? `${fail} device${fail > 1 ? 's' : ''} failed – check credentials.` : 'All devices backed up successfully.'
+    );
+  } else {
+    showError('All devices failed', 'Check SSH credentials and device reachability.');
+  }
+  finishWizard(ok > 0);
+}
+
+// ── Banners & finish ──────────────────────────────────────────────────────────
+function showSuccess(title, detail) {
+  document.getElementById('successTitle').textContent  = title;
+  document.getElementById('successDetail').textContent = detail;
+  document.getElementById('successBanner').classList.remove('hidden');
+}
+function showError(title, detail) {
+  document.getElementById('errorTitle').textContent  = title;
+  document.getElementById('errorDetail').textContent = detail;
+  document.getElementById('errorBanner').classList.remove('hidden');
+}
+function finishWizard() {
+  document.getElementById('startBtn').classList.add('hidden');
+  document.getElementById('cancelBtn').disabled = false;
+  document.getElementById('cancelBtn').textContent = 'Close';
+  document.getElementById('backupModalClose').disabled = false;
+  document.getElementById('doneBtn').classList.remove('hidden');
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Schedule ──────────────────────────────────────────────────────────────────
+async function saveSchedule() {
+  const t = document.getElementById('scheduleTime').value;
+  const res = await fetch('/api/collect/schedule', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ time: t })
+  });
+  if (res.ok) {
+    document.getElementById('scheduleDisplay').textContent = t;
+    const btn = document.getElementById('saveScheduleBtn');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check-lg"></i>Saved!';
+    btn.classList.remove('btn-outline'); btn.classList.add('btn-success');
+    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('btn-success'); btn.classList.add('btn-outline'); }, 2000);
+  }
+}
+
+// ── Credentials ───────────────────────────────────────────────────────────────
+function openCredModal(id, name, username, port, enabled) {
+  document.getElementById('credDeviceId').value         = id;
+  document.getElementById('credDeviceName').textContent = name;
+  document.getElementById('credUsername').value         = username;
+  document.getElementById('credPassword').value         = '';
+  document.getElementById('credPort').value             = port;
+  document.getElementById('credEnabled').checked        = enabled;
+  document.getElementById('credError').classList.add('hidden');
+  document.getElementById('credModal').classList.remove('hidden');
+}
+
+async function saveCredentials() {
+  const errEl = document.getElementById('credError');
+  errEl.classList.add('hidden');
+  const id      = document.getElementById('credDeviceId').value;
+  const payload = {
+    ssh_username: document.getElementById('credUsername').value.trim(),
+    ssh_port:     parseInt(document.getElementById('credPort').value),
+    ssh_enabled:  document.getElementById('credEnabled').checked,
+  };
+  const pwd = document.getElementById('credPassword').value;
+  if (pwd) payload.ssh_password = pwd;
+  const res = await fetch(`/api/devices/${id}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+  });
+  if (res.ok) {
+    document.getElementById('credModal').classList.add('hidden');
+    location.reload();
+  } else {
+    const d = await res.json();
+    errEl.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${d.error || 'Failed to save credentials.'}`;
+    errEl.classList.remove('hidden');
+  }
+}
+
+function togglePwd() {
+  const inp  = document.getElementById('credPassword');
+  const icon = document.getElementById('eyeIcon');
+  inp.type   = inp.type === 'password' ? 'text' : 'password';
+  icon.className = inp.type === 'password' ? 'bi bi-eye' : 'bi bi-eye-slash';
+}
+
+// Close modals on overlay click
+['backupModal','credModal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', function(e) {
+    if (e.target === this) this.classList.add('hidden');
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+//  TABLE UTILITIES  (search · filter · sort · paginate)
+// ══════════════════════════════════════════════════════════
+
+function buildPaginator(navId, totalPages, currentPage, onGo) {
+  const nav = document.getElementById(navId);
+  nav.innerHTML = '';
+  if (totalPages <= 1) return;
+
+  const make = (label, page, disabled, active) => {
+    const btn = document.createElement('button');
+    btn.className = `pag-btn${active ? ' active' : ''}`;
+    btn.textContent = label;
+    btn.disabled = disabled;
+    if (!disabled && !active) btn.onclick = () => onGo(page);
+    nav.appendChild(btn);
+  };
+
+  make('‹', currentPage - 1, currentPage === 1, false);
+  const delta = 2;
+  const pages = [];
+  for (let i = 1; i <= totalPages; i++) {
+    if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) pages.push(i);
+  }
+  let prev = null;
+  for (const p of pages) {
+    if (prev !== null && p - prev > 1) {
+      const span = document.createElement('span');
+      span.textContent = '…'; span.className = 'text-slate-400 text-xs px-1';
+      nav.appendChild(span);
+    }
+    make(p, p, false, p === currentPage);
+    prev = p;
+  }
+  make('›', currentPage + 1, currentPage === totalPages, false);
+}
+
+// ── Devices table ─────────────────────────────────────────────────────────────
+let devRows = [], devFiltered = [], devCurrentPage = 1, devSortCol = -1, devSortAsc = true;
+
+function devInit() {
+  devRows = Array.from(document.querySelectorAll('#devTbody tr[data-hostname]'));
+  if (!devRows.length) return;
+  document.querySelectorAll('#devTable thead .sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = parseInt(th.dataset.col);
+      if (devSortCol === col) devSortAsc = !devSortAsc;
+      else { devSortCol = col; devSortAsc = true; }
+      document.querySelectorAll('#devTable thead .sortable i').forEach(i => i.className = 'bi bi-chevron-expand text-slate-300 text-xs');
+      th.querySelector('i').className = `bi bi-chevron-${devSortAsc ? 'up' : 'down'} text-blue-500 text-xs`;
+      devApplyFilters();
+    });
+  });
+  devApplyFilters();
+}
+
+function devApplyFilters() {
+  const q = (document.getElementById('devSearch').value || '').toLowerCase().trim();
+  const sshF = document.getElementById('devSshFilter').value;
+  const statusF = document.getElementById('devStatusFilter').value;
+  devFiltered = devRows.filter(tr => {
+    const matchQ   = !q || tr.dataset.hostname.includes(q) || tr.dataset.ip.includes(q);
+    const matchSsh = !sshF || tr.dataset.ssh === sshF;
+    const matchSt  = !statusF || tr.dataset.lastStatus === statusF;
+    return matchQ && matchSsh && matchSt;
+  });
+  if (devSortCol >= 0) {
+    devFiltered.sort((a, b) => {
+      const av = a.cells[devSortCol]?.textContent.trim() || '';
+      const bv = b.cells[devSortCol]?.textContent.trim() || '';
+      return devSortAsc ? av.localeCompare(bv, undefined, {numeric:true}) : bv.localeCompare(av, undefined, {numeric:true});
+    });
+  }
+  devGoPage(1);
+}
+
+function devGoPage(page) {
+  const size  = parseInt(document.getElementById('devPageSize').value);
+  const total = devFiltered.length;
+  const pages = Math.max(1, Math.ceil(total / size));
+  devCurrentPage = Math.min(Math.max(1, page), pages);
+  const start = (devCurrentPage - 1) * size;
+  const end   = Math.min(start + size, total);
+  const tbody = document.getElementById('devTbody');
+  devRows.forEach(tr => { tr.style.display = 'none'; });
+  devFiltered.slice(start, end).forEach(tr => { tbody.appendChild(tr); tr.style.display = ''; });
+  let noRow = document.getElementById('devNoResults');
+  if (total === 0) {
+    if (!noRow) {
+      noRow = document.createElement('tr'); noRow.id = 'devNoResults';
+      noRow.innerHTML = '<td colspan="7" class="text-center text-slate-400 py-8 text-sm">No devices match your filters.</td>';
+    }
+    tbody.appendChild(noRow); noRow.style.display = '';
+  } else if (noRow) { noRow.style.display = 'none'; }
+  document.getElementById('devPagInfo').textContent = total ? `Showing ${start+1}–${end} of ${total} device${total !== 1 ? 's' : ''}` : '';
+  buildPaginator('devPagNav', pages, devCurrentPage, devGoPage);
+}
+
+// ── Log table ─────────────────────────────────────────────────────────────────
+let logRows = [], logFiltered = [], logCurrentPage = 1, logSortCol = -1, logSortAsc = true;
+
+function logInit() {
+  logRows = Array.from(document.querySelectorAll('#logTbody tr[data-device]'));
+  if (!logRows.length) return;
+  document.querySelectorAll('#logTable thead .sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = parseInt(th.dataset.col);
+      if (logSortCol === col) logSortAsc = !logSortAsc;
+      else { logSortCol = col; logSortAsc = true; }
+      document.querySelectorAll('#logTable thead .sortable i').forEach(i => i.className = 'bi bi-chevron-expand text-slate-300 text-xs');
+      th.querySelector('i').className = `bi bi-chevron-${logSortAsc ? 'up' : 'down'} text-blue-500 text-xs`;
+      logApplyFilters();
+    });
+  });
+  logApplyFilters();
+}
+
+function logApplyFilters() {
+  const q = (document.getElementById('logSearch').value || '').toLowerCase().trim();
+  const statusF = document.getElementById('logStatusFilter').value;
+  logFiltered = logRows.filter(tr => {
+    const matchQ  = !q || tr.dataset.device.includes(q) || tr.dataset.message.includes(q);
+    const matchSt = !statusF || tr.dataset.status === statusF;
+    return matchQ && matchSt;
+  });
+  if (logSortCol >= 0) {
+    logFiltered.sort((a, b) => {
+      const av = a.cells[logSortCol]?.textContent.trim() || '';
+      const bv = b.cells[logSortCol]?.textContent.trim() || '';
+      return logSortAsc ? av.localeCompare(bv, undefined, {numeric:true}) : bv.localeCompare(av, undefined, {numeric:true});
+    });
+  }
+  logGoPage(1);
+}
+
+function logGoPage(page) {
+  const size  = parseInt(document.getElementById('logPageSize').value);
+  const total = logFiltered.length;
+  const pages = Math.max(1, Math.ceil(total / size));
+  logCurrentPage = Math.min(Math.max(1, page), pages);
+  const start = (logCurrentPage - 1) * size;
+  const end   = Math.min(start + size, total);
+  const tbody = document.getElementById('logTbody');
+  logRows.forEach(tr => { tr.style.display = 'none'; });
+  logFiltered.slice(start, end).forEach(tr => { tbody.appendChild(tr); tr.style.display = ''; });
+  let noRow = document.getElementById('logNoResults');
+  if (total === 0) {
+    if (!noRow) {
+      noRow = document.createElement('tr'); noRow.id = 'logNoResults';
+      noRow.innerHTML = '<td colspan="5" class="text-center text-slate-400 py-6 text-sm">No log entries match your filters.</td>';
+    }
+    tbody.appendChild(noRow); noRow.style.display = '';
+  } else if (noRow) { noRow.style.display = 'none'; }
+  document.getElementById('logPagInfo').textContent = total ? `Showing ${start+1}–${end} of ${total} entr${total !== 1 ? 'ies' : 'y'}` : '';
+  buildPaginator('logPagNav', pages, logCurrentPage, logGoPage);
+}
+
+document.addEventListener('DOMContentLoaded', () => { devInit(); logInit(); });
+</script>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { display: inline-block; animation: spin .7s linear infinite; }
+</style>
+{% endblock %}

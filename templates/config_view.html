@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}Config {{ config.config_date }} – {{ config.device.hostname }}{% endblock %}
+{% block page_label %}
+  <div class="breadcrumb">
+    <a href="{{ url_for('devices') }}">Devices</a>
+    <span class="breadcrumb-sep"><i class="bi bi-chevron-right text-xs"></i></span>
+    <a href="{{ url_for('device_detail', device_id=config.device.id) }}">{{ config.device.hostname }}</a>
+    <span class="breadcrumb-sep"><i class="bi bi-chevron-right text-xs"></i></span>
+    <span class="text-slate-700 font-medium">{{ config.config_date }}</span>
+  </div>
+{% endblock %}
+
+{% block topbar_right %}
+<button onclick="copyConfig()" class="btn btn-sm btn-outline-gray"><i class="bi bi-clipboard"></i>Copy</button>
+<a href="{{ url_for('download_config', config_id=config.id) }}" class="btn btn-sm btn-outline-gray"><i class="bi bi-download"></i>Download</a>
+<a href="{{ url_for('diff_page') }}" class="btn btn-sm btn-outline"><i class="bi bi-file-diff"></i>Diff</a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Meta card -->
+<div class="card-glass px-6 py-4 mb-5 flex items-center gap-5">
+  <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#0f172a,#1e3a5f);">
+    <i class="bi bi-file-earmark-code text-sky-400 text-xl"></i>
+  </div>
+  <div class="flex-1">
+    <h5 class="font-bold text-slate-800 text-lg leading-tight mb-0.5">
+      {{ config.device.hostname }}
+      <span class="text-slate-400 font-normal text-base mx-1">—</span>
+      <span class="text-blue-600">{{ config.config_date }}</span>
+    </h5>
+    <div class="flex items-center flex-wrap gap-3 text-xs text-slate-400">
+      {% if config.note %}
+      <span class="badge badge-neutral"><i class="bi bi-tag"></i>{{ config.note }}</span>
+      {% endif %}
+      <span><i class="bi bi-clock mr-1"></i>Saved {{ config.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</span>
+      <span><i class="bi bi-hdd mr-1"></i>{{ (config.content|length / 1024)|round(1) }} KB</span>
+      {% if config.source == 'auto' %}
+        <span class="badge badge-info"><i class="bi bi-robot"></i>Auto-collected</span>
+      {% else %}
+        <span class="badge badge-neutral"><i class="bi bi-person"></i>Manual</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Config block -->
+<div class="card-glass overflow-hidden">
+  <div class="flex items-center justify-between px-5 py-3" style="background:#0d1117;border-radius:12px 12px 0 0;">
+    <div class="flex items-center gap-3">
+      <div class="flex gap-1.5">
+        <span class="w-3 h-3 rounded-full bg-red-500 opacity-70"></span>
+        <span class="w-3 h-3 rounded-full bg-yellow-400 opacity-70"></span>
+        <span class="w-3 h-3 rounded-full bg-green-500 opacity-70"></span>
+      </div>
+      <span class="text-xs text-slate-500 font-mono">{{ config.device.hostname }}_{{ config.config_date }}.conf</span>
+    </div>
+    <button id="copyBtn" onclick="copyConfig()" class="text-xs text-slate-500 hover:text-sky-400 transition-colors flex items-center gap-1.5">
+      <i class="bi bi-clipboard"></i>Copy
+    </button>
+  </div>
+  <pre class="config-block" id="configContent" style="border-radius:0 0 12px 12px;margin:0;">{{ config.content }}</pre>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const configContent = document.getElementById('configContent').textContent;
+const filename = '{{ config.device.hostname }}_{{ config.config_date }}.conf';
+
+function copyConfig() {
+  navigator.clipboard.writeText(configContent).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.innerHTML = '<i class="bi bi-check text-green-400"></i><span class="text-green-400">Copied!</span>';
+    setTimeout(() => btn.innerHTML = '<i class="bi bi-clipboard"></i>Copy', 2000);
+  });
+}
+</script>
+{% endblock %}

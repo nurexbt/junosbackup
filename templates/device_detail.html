@@ -1,0 +1,441 @@
+{% extends 'base.html' %}
+{% block title %}{{ device.hostname }} – Juniper CM{% endblock %}
+{% block page_label %}
+  <div class="breadcrumb">
+    <a href="{{ url_for('devices') }}">Devices</a>
+    <span class="breadcrumb-sep"><i class="bi bi-chevron-right text-xs"></i></span>
+    <span class="text-slate-700 font-medium">{{ device.hostname }}</span>
+  </div>
+{% endblock %}
+
+{% block topbar_right %}
+<button class="btn btn-sm btn-success" onclick="openBackupModal()">
+  <i class="bi bi-cloud-download"></i>Create Backup
+</button>
+<button class="btn btn-sm btn-outline-gray" onclick="document.getElementById('pasteConfigModal').classList.remove('hidden')">
+  <i class="bi bi-clipboard"></i>Paste Config
+</button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Device info card -->
+<div class="card-glass mb-6 px-6 py-5">
+  <div class="flex items-center gap-4">
+    <div class="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#1d4ed8,#38bdf8);">
+      <i class="bi bi-router text-white text-2xl"></i>
+    </div>
+    <div class="flex-1">
+      <h4 class="text-xl font-bold text-slate-800 mb-0.5">{{ device.hostname }}</h4>
+      <div class="flex items-center flex-wrap gap-3 text-sm text-slate-500">
+        <code class="bg-slate-100 rounded px-2 py-0.5 text-xs text-slate-600">{{ device.ip_address }}</code>
+        {% if device.model %}<span class="flex items-center gap-1"><i class="bi bi-cpu text-slate-400"></i>{{ device.model }}</span>{% endif %}
+        {% if device.location %}<span class="flex items-center gap-1"><i class="bi bi-geo-alt text-slate-400"></i>{{ device.location }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="flex items-center gap-3 text-center">
+      <div class="text-center">
+        <div class="text-2xl font-bold text-blue-600">{{ configs|length }}</div>
+        <div class="text-xs text-slate-400">snapshots</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Config history -->
+<div class="card-glass mb-6">
+  <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+    <div class="flex items-center gap-2">
+      <i class="bi bi-clock-history text-blue-500"></i>
+      <span class="font-semibold text-slate-700">Configuration History</span>
+      <span class="badge badge-info">{{ configs|length }}</span>
+    </div>
+  </div>
+  {% if configs %}
+  <div class="overflow-x-auto">
+    <table class="w-full tbl">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Source</th>
+          <th>Note</th>
+          <th>Size</th>
+          <th>Saved At</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in configs %}
+        <tr>
+          <td>
+            <span class="badge badge-neutral">{{ c.config_date }}</span>
+            {% if c.config_date.isoformat() == today %}<span class="badge badge-success ml-1">Today</span>{% endif %}
+          </td>
+          <td>
+            {% if c.source == 'auto' %}
+              <span class="badge badge-info"><i class="bi bi-robot"></i>Auto</span>
+            {% else %}
+              <span class="badge badge-neutral"><i class="bi bi-person"></i>Manual</span>
+            {% endif %}
+          </td>
+          <td class="text-slate-500 text-xs">{{ c.note or '—' }}</td>
+          <td class="text-slate-400 text-xs">{{ (c.content|length / 1024)|round(1) }} KB</td>
+          <td class="text-slate-400 text-xs whitespace-nowrap">{{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="text-right">
+            <div class="flex items-center justify-end gap-1">
+              <a href="{{ url_for('config_view', config_id=c.id) }}" class="btn btn-xs btn-outline"><i class="bi bi-eye"></i></a>
+              <button onclick="deleteConfig({{ c.id }})" class="btn btn-xs btn-outline-red"><i class="bi bi-trash"></i></button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="flex flex-col items-center justify-center py-14 text-slate-400">
+    <i class="bi bi-file-earmark-text text-4xl mb-3 text-slate-300"></i>
+    <p class="text-sm">No configurations stored yet.</p>
+    <p class="text-xs mt-1">Click <strong class="text-slate-600">Create Backup</strong> to pull from the device.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Collection log -->
+{% if logs %}
+<div class="card-glass">
+  <div class="flex items-center gap-2 px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+    <i class="bi bi-journal-text text-blue-500"></i>
+    <span class="font-semibold text-slate-700">Collection Log</span>
+    <span class="badge badge-neutral">{{ logs|length }}</span>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full tbl">
+      <thead>
+        <tr><th>Time</th><th>Status</th><th>Message</th><th>Config</th></tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="text-slate-400 text-xs whitespace-nowrap">{{ log.run_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            <span class="badge {% if log.status == 'success' %}badge-success{% elif log.status == 'failed' %}badge-danger{% else %}badge-neutral{% endif %}">
+              <i class="bi bi-{% if log.status == 'success' %}check-circle{% elif log.status == 'failed' %}x-circle{% else %}dash-circle{% endif %}"></i>
+              {{ log.status }}
+            </span>
+          </td>
+          <td class="text-slate-400 text-xs">{{ log.message or '—' }}</td>
+          <td>
+            {% if log.config_id %}
+            <a href="{{ url_for('config_view', config_id=log.config_id) }}" class="btn btn-xs btn-outline"><i class="bi bi-eye"></i></a>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+
+<!-- ══════════════════════════════════════════════════════════
+     BACKUP WIZARD MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="backupModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl stat-gradient-blue flex items-center justify-center">
+          <i class="bi bi-cloud-download text-white"></i>
+        </div>
+        <div>
+          <h5 class="font-semibold text-slate-800 leading-tight">Create Backup</h5>
+          <p class="text-xs text-slate-400">{{ device.hostname }}</p>
+        </div>
+      </div>
+      <button id="backupModalClose" onclick="document.getElementById('backupModal').classList.add('hidden')" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+
+    <div class="p-6">
+      <!-- Note -->
+      <div id="noteSection" class="mb-5">
+        <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Backup note (optional)</label>
+        <input type="text" id="backupNote" class="form-input" placeholder="e.g. pre-change snapshot" value="manual backup" />
+      </div>
+
+      <!-- Steps -->
+      <div class="flex flex-col gap-1" id="stepList">
+        <!-- Step 1 -->
+        <div class="flex items-start gap-3" id="step-login">
+          <div id="icon-login" class="step-icon-wrap step-idle mt-0.5">
+            <i class="bi bi-plug"></i>
+          </div>
+          <div class="flex-1">
+            <div class="font-semibold text-sm text-slate-700">Step 1 — Router Login</div>
+            <div id="msg-login" class="text-xs text-slate-400 mt-0.5">
+              SSH connect to <code class="bg-slate-100 rounded px-1">{{ device.ip_address }}:{{ device.ssh_port or 22 }}</code>
+              as <code class="bg-slate-100 rounded px-1">{{ device.ssh_username or '(no user set)' }}</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="step-connector ml-4"></div>
+
+        <!-- Step 2 -->
+        <div class="flex items-start gap-3" id="step-backup">
+          <div id="icon-backup" class="step-icon-wrap step-skipped mt-0.5">
+            <i class="bi bi-hdd"></i>
+          </div>
+          <div class="flex-1">
+            <div class="font-semibold text-sm text-slate-400" id="label-backup">Step 2 — Capture &amp; Save Config</div>
+            <div id="msg-backup" class="text-xs text-slate-400 mt-0.5">
+              Run <code class="bg-slate-100 rounded px-1">show configuration | display set | no-more</code>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Success banner -->
+      <div id="successBanner" class="hidden mt-5">
+        <div class="alert alert-success">
+          <i class="bi bi-check-circle-fill text-lg"></i>
+          <div>
+            <div class="font-semibold">Backup completed successfully!</div>
+            <div class="text-xs mt-0.5" id="successDetail"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error banner -->
+      <div id="errorBanner" class="hidden mt-5">
+        <div class="alert alert-danger">
+          <i class="bi bi-x-circle-fill text-lg"></i>
+          <div>
+            <div class="font-semibold" id="errorTitle">Backup failed</div>
+            <div class="text-xs mt-0.5" id="errorDetail"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-end items-center gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
+      <button id="cancelBtn" onclick="document.getElementById('backupModal').classList.add('hidden')" class="btn btn-secondary btn-sm">Cancel</button>
+      <button id="startBackupBtn" onclick="startBackup()" class="btn btn-primary btn-sm"><i class="bi bi-play-fill"></i>Start Backup</button>
+      <a href="#" id="viewConfigBtn" class="btn btn-success btn-sm hidden"><i class="bi bi-eye"></i>View Config</a>
+      <button id="doneBtn" onclick="location.reload()" class="btn btn-outline-gray btn-sm hidden"><i class="bi bi-arrow-clockwise"></i>Refresh</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     PASTE CONFIG MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="pasteConfigModal" class="modal-overlay hidden">
+  <div class="modal-box modal-lg">
+    <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center">
+          <i class="bi bi-clipboard text-slate-600"></i>
+        </div>
+        <h5 class="font-semibold text-slate-800">Paste Configuration – {{ device.hostname }}</h5>
+      </div>
+      <button onclick="document.getElementById('pasteConfigModal').classList.add('hidden')" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+    <div class="p-6 flex flex-col gap-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Config Date</label>
+          <input type="date" id="cfg_date" class="form-input" value="{{ today }}" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Note (optional)</label>
+          <input type="text" id="cfg_note" class="form-input" placeholder="e.g. post-change snapshot" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Configuration Content <span class="text-red-500">*</span></label>
+        <textarea id="cfg_content" class="form-input" style="min-height:320px;font-family:'JetBrains Mono',monospace;font-size:.8rem;" placeholder="Paste Juniper configuration here…"></textarea>
+      </div>
+      <div id="addConfigError" class="alert alert-danger hidden"></div>
+    </div>
+    <div class="flex justify-end gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
+      <button onclick="document.getElementById('pasteConfigModal').classList.add('hidden')" class="btn btn-secondary">Cancel</button>
+      <button id="saveConfigBtn" class="btn btn-primary"><i class="bi bi-save"></i>Save Configuration</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const deviceId = {{ device.id }};
+const today    = '{{ today }}';
+
+// ── Step state helpers ────────────────────────────────────────────────────────
+function setStepState(step, state) {
+  const wrap = document.getElementById(`icon-${step}`);
+  const cls  = { idle:'step-idle', running:'step-running', success:'step-success', failed:'step-failed', skipped:'step-skipped' };
+  const icon = { login:{ idle:'bi-plug', running:'bi-arrow-repeat spin', success:'bi-check-lg', failed:'bi-x-lg', skipped:'bi-dash-lg' },
+                 backup:{ idle:'bi-hdd', running:'bi-arrow-repeat spin', success:'bi-check-lg', failed:'bi-x-lg', skipped:'bi-dash-lg' } };
+  wrap.className = `step-icon-wrap ${cls[state] || cls.idle} mt-0.5`;
+  wrap.innerHTML = `<i class="bi ${icon[step][state] || icon[step].idle}"></i>`;
+}
+
+function setStepMsg(step, html, cls = 'text-slate-400') {
+  const el = document.getElementById(`msg-${step}`);
+  el.className = `text-xs mt-0.5 ${cls}`;
+  el.innerHTML = html;
+}
+
+// ── Backup wizard ─────────────────────────────────────────────────────────────
+function openBackupModal() {
+  resetWizard();
+  document.getElementById('backupModal').classList.remove('hidden');
+}
+
+function resetWizard() {
+  document.getElementById('noteSection').classList.remove('hidden');
+  document.getElementById('backupNote').value = 'manual backup';
+  document.getElementById('startBackupBtn').classList.remove('hidden');
+  document.getElementById('startBackupBtn').disabled = false;
+  document.getElementById('startBackupBtn').innerHTML = '<i class="bi bi-play-fill"></i>Start Backup';
+  document.getElementById('cancelBtn').classList.remove('hidden');
+  document.getElementById('cancelBtn').textContent = 'Cancel';
+  document.getElementById('cancelBtn').disabled = false;
+  document.getElementById('viewConfigBtn').classList.add('hidden');
+  document.getElementById('doneBtn').classList.add('hidden');
+  document.getElementById('successBanner').classList.add('hidden');
+  document.getElementById('errorBanner').classList.add('hidden');
+  document.getElementById('backupModalClose').disabled = false;
+  setStepState('login',  'idle');
+  setStepState('backup', 'skipped');
+  document.getElementById('label-backup').classList.add('text-slate-400');
+  document.getElementById('label-backup').classList.remove('text-slate-700');
+}
+
+async function startBackup() {
+  const note = document.getElementById('backupNote').value.trim() || 'manual backup';
+  document.getElementById('noteSection').classList.add('hidden');
+  document.getElementById('startBackupBtn').disabled = true;
+  document.getElementById('startBackupBtn').innerHTML = '<span class="bi bi-arrow-repeat spin"></span>Running…';
+  document.getElementById('cancelBtn').disabled = true;
+  document.getElementById('backupModalClose').disabled = true;
+
+  setStepState('login', 'running');
+  setStepMsg('login', 'Connecting…', 'text-blue-500');
+
+  let result;
+  try {
+    const res = await fetch(`/api/collect/manual/{{ device.id }}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ note }),
+    });
+    result = await res.json();
+  } catch (err) {
+    result = { login:{ status:'failed', message:'Network error: '+err.message }, backup:{ status:'skipped' } };
+  }
+
+  const login = result.login || {};
+  if (login.status === 'success') {
+    setStepState('login', 'success');
+    setStepMsg('login', '✓ '+login.message, 'text-green-600');
+  } else {
+    setStepState('login', 'failed');
+    setStepMsg('login', login.message || 'Login failed', 'text-red-500');
+  }
+
+  await sleep(400);
+
+  const backup = result.backup || {};
+  document.getElementById('label-backup').classList.remove('text-slate-400');
+  document.getElementById('label-backup').classList.add('text-slate-700');
+
+  if (backup.status === 'success') {
+    setStepState('backup', 'success');
+    setStepMsg('backup', '✓ '+backup.message, 'text-green-600');
+    document.getElementById('successDetail').textContent = `${backup.lines} lines captured and saved for ${today}.`;
+    document.getElementById('successBanner').classList.remove('hidden');
+    document.getElementById('startBackupBtn').classList.add('hidden');
+    document.getElementById('cancelBtn').textContent = 'Close';
+    document.getElementById('cancelBtn').disabled = false;
+    document.getElementById('backupModalClose').disabled = false;
+    document.getElementById('doneBtn').classList.remove('hidden');
+    if (backup.config_id) {
+      const vb = document.getElementById('viewConfigBtn');
+      vb.href = `/configs/${backup.config_id}`;
+      vb.classList.remove('hidden');
+    }
+  } else if (backup.status === 'skipped') {
+    setStepState('backup', 'skipped');
+    setStepMsg('backup', 'Skipped (login failed)', 'text-slate-400');
+    showError('Login failed', login.message || 'Could not authenticate to the device.');
+  } else {
+    setStepState('backup', 'failed');
+    setStepMsg('backup', backup.message || 'Backup failed', 'text-red-500');
+    showError('Backup failed', backup.message || 'Command execution or save error.');
+  }
+
+  if (backup.status !== 'success') {
+    document.getElementById('startBackupBtn').classList.add('hidden');
+    document.getElementById('cancelBtn').disabled = false;
+    document.getElementById('cancelBtn').textContent = 'Close';
+    document.getElementById('backupModalClose').disabled = false;
+    document.getElementById('doneBtn').classList.remove('hidden');
+  }
+}
+
+function showError(title, detail) {
+  document.getElementById('errorTitle').textContent  = title;
+  document.getElementById('errorDetail').textContent = detail;
+  document.getElementById('errorBanner').classList.remove('hidden');
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── Paste config ──────────────────────────────────────────────────────────────
+document.getElementById('saveConfigBtn').addEventListener('click', async () => {
+  const errEl = document.getElementById('addConfigError');
+  errEl.classList.add('hidden');
+  const payload = {
+    device_id:   deviceId,
+    config_date: document.getElementById('cfg_date').value,
+    note:        document.getElementById('cfg_note').value.trim(),
+    content:     document.getElementById('cfg_content').value,
+    source:      'manual',
+  };
+  if (!payload.content.trim()) {
+    errEl.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Configuration content is required.';
+    errEl.classList.remove('hidden'); return;
+  }
+  const res = await fetch('/api/configs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  if (res.ok) { location.reload(); }
+  else {
+    const data = await res.json();
+    errEl.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${data.error || 'Failed to save configuration.'}`;
+    errEl.classList.remove('hidden');
+  }
+});
+
+async function deleteConfig(id) {
+  if (!confirm('Delete this configuration snapshot?')) return;
+  const res = await fetch(`/api/configs/${id}`, { method:'DELETE' });
+  if (res.ok) location.reload();
+  else alert('Failed to delete configuration.');
+}
+
+// Close modals on overlay click
+['backupModal','pasteConfigModal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', function(e) {
+    if (e.target === this) this.classList.add('hidden');
+  });
+});
+</script>
+{% endblock %}
