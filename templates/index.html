@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Dashboard – Juniper CM{% endblock %}
+{% block title %}Dashboard – Device Backup Manager{% endblock %}
 {% block page_label %}<i class="bi bi-speedometer2 mr-2 text-blue-500"></i>Dashboard{% endblock %}
 
 {% block topbar_right %}
@@ -13,8 +13,8 @@
 
 {% block content %}
 
-<!-- ── Stat Cards ── -->
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-7">
+<!-- ── Row 1: Clock + Device counts + Config counts ── -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
 
   <!-- Clock -->
   <div class="stat-gradient-dark rounded-2xl p-5 text-white shadow-md">
@@ -36,7 +36,7 @@
       </span>
     </div>
     <div class="text-4xl font-bold">{{ devices|length }}</div>
-    <div class="text-xs opacity-60 mt-1">Managed routers</div>
+    <div class="text-xs opacity-60 mt-1">Managed devices</div>
   </div>
 
   <!-- Stored configs -->
@@ -62,6 +62,86 @@
     <div class="text-4xl font-bold">{{ today_configs }}</div>
     <div class="text-xs opacity-60 mt-1">Saved today</div>
   </div>
+</div>
+
+<!-- ── Row 2: Juniper + Huawei + System (CPU / RAM / Disk) ── -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5 mb-7">
+
+  <!-- Juniper Routers -->
+  <div class="rounded-2xl p-5 text-white shadow-md" style="background:linear-gradient(135deg,#0369a1,#0ea5e9);">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest opacity-80">Juniper Routers</span>
+      <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(255,255,255,.15);">
+        <i class="bi bi-router text-base"></i>
+      </span>
+    </div>
+    <div class="text-4xl font-bold">{{ junos_count }}</div>
+    <div class="text-xs opacity-60 mt-1">Junos · SSH</div>
+  </div>
+
+  <!-- Huawei Switches -->
+  <div class="rounded-2xl p-5 text-white shadow-md" style="background:linear-gradient(135deg,#be185d,#ec4899);">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest opacity-80">Huawei Switches</span>
+      <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(255,255,255,.15);">
+        <i class="bi bi-diagram-3 text-base"></i>
+      </span>
+    </div>
+    <div class="text-4xl font-bold">{{ huawei_count }}</div>
+    <div class="text-xs opacity-60 mt-1">Huawei · Telnet</div>
+  </div>
+
+  <!-- CPU -->
+  <div class="card-glass p-5 rounded-2xl">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest text-slate-500">CPU Usage</span>
+      <i class="bi bi-cpu text-blue-400 text-lg"></i>
+    </div>
+    <div class="flex items-end gap-1 mb-2">
+      <span id="cpuPct" class="text-3xl font-bold text-slate-800">{{ sys_info.cpu_pct }}</span>
+      <span class="text-slate-400 text-sm mb-1">%</span>
+    </div>
+    <div class="w-full rounded-full h-2" style="background:#e2e8f0;">
+      <div id="cpuBar" class="h-2 rounded-full transition-all duration-700"
+           style="width:{{ sys_info.cpu_pct }}%;background:{% if sys_info.cpu_pct > 80 %}#ef4444{% elif sys_info.cpu_pct > 60 %}#f59e0b{% else %}#3b82f6{% endif %};"></div>
+    </div>
+    <div class="text-xs text-slate-400 mt-1.5">Live · updates every 5s</div>
+  </div>
+
+  <!-- RAM -->
+  <div class="card-glass p-5 rounded-2xl">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest text-slate-500">RAM Usage</span>
+      <i class="bi bi-memory text-purple-400 text-lg"></i>
+    </div>
+    <div class="flex items-end gap-1 mb-2">
+      <span id="ramPct" class="text-3xl font-bold text-slate-800">{{ sys_info.ram_pct }}</span>
+      <span class="text-slate-400 text-sm mb-1">%</span>
+    </div>
+    <div class="w-full rounded-full h-2" style="background:#e2e8f0;">
+      <div id="ramBar" class="h-2 rounded-full transition-all duration-700"
+           style="width:{{ sys_info.ram_pct }}%;background:{% if sys_info.ram_pct > 80 %}#ef4444{% elif sys_info.ram_pct > 60 %}#f59e0b{% else %}#7c3aed{% endif %};"></div>
+    </div>
+    <div id="ramDetail" class="text-xs text-slate-400 mt-1.5">{{ sys_info.ram_used }} GB / {{ sys_info.ram_total }} GB</div>
+  </div>
+
+  <!-- Disk -->
+  <div class="card-glass p-5 rounded-2xl">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-xs font-semibold uppercase tracking-widest text-slate-500">Disk Usage</span>
+      <i class="bi bi-hdd text-green-400 text-lg"></i>
+    </div>
+    <div class="flex items-end gap-1 mb-2">
+      <span id="diskPct" class="text-3xl font-bold text-slate-800">{{ sys_info.disk_pct }}</span>
+      <span class="text-slate-400 text-sm mb-1">%</span>
+    </div>
+    <div class="w-full rounded-full h-2" style="background:#e2e8f0;">
+      <div id="diskBar" class="h-2 rounded-full transition-all duration-700"
+           style="width:{{ sys_info.disk_pct }}%;background:{% if sys_info.disk_pct > 80 %}#ef4444{% elif sys_info.disk_pct > 60 %}#f59e0b{% else %}#059669{% endif %};"></div>
+    </div>
+    <div id="diskDetail" class="text-xs text-slate-400 mt-1.5">{{ sys_info.disk_used }} GB / {{ sys_info.disk_total }} GB</div>
+  </div>
+
 </div>
 
 <!-- ── Device Table ── -->
@@ -227,6 +307,42 @@ function tickClock() {
   document.getElementById('clockDay').textContent  = parts.weekday;
 }
 tickClock(); setInterval(tickClock, 1000);
+
+// ── Live system stats ─────────────────────────────────────────────────────────
+function barColor(pct) {
+  if (pct > 80) return '#ef4444';
+  if (pct > 60) return '#f59e0b';
+  return null; // keep original
+}
+
+async function refreshStats() {
+  try {
+    const r = await fetch('/api/system/stats');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    // CPU
+    document.getElementById('cpuPct').textContent = d.cpu_pct;
+    const cpuBar = document.getElementById('cpuBar');
+    cpuBar.style.width = d.cpu_pct + '%';
+    cpuBar.style.background = barColor(d.cpu_pct) || '#3b82f6';
+
+    // RAM
+    document.getElementById('ramPct').textContent    = d.ram_pct;
+    document.getElementById('ramDetail').textContent = `${d.ram_used} GB / ${d.ram_total} GB`;
+    const ramBar = document.getElementById('ramBar');
+    ramBar.style.width = d.ram_pct + '%';
+    ramBar.style.background = barColor(d.ram_pct) || '#7c3aed';
+
+    // Disk
+    document.getElementById('diskPct').textContent    = d.disk_pct;
+    document.getElementById('diskDetail').textContent = `${d.disk_used} GB / ${d.disk_total} GB`;
+    const diskBar = document.getElementById('diskBar');
+    diskBar.style.width = d.disk_pct + '%';
+    diskBar.style.background = barColor(d.disk_pct) || '#059669';
+  } catch(e) { /* silent fail */ }
+}
+setInterval(refreshStats, 5000);
 
 // ── Add Device ────────────────────────────────────────────────────────────────
 document.getElementById('saveDeviceBtn').addEventListener('click', async () => {

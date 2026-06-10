@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}User Manager – Juniper CM{% endblock %}
+{% block title %}User Manager – Device Backup Manager{% endblock %}
 {% block page_label %}<i class="bi bi-people mr-2 text-blue-500"></i>User Manager{% endblock %}
 
 {% block topbar_right %}
@@ -86,7 +86,16 @@
       </thead>
       <tbody id="usersBody">
         {% for u in users %}
-        <tr data-username="{{ u.username|lower }}" data-name="{{ (u.display_name or u.username)|lower }}">
+        {# Permission logic:
+           super_admin  → can edit/delete anyone (including other super_admins), and own profile
+           admin        → can edit/delete admin + read_only users only, and own profile
+           (read_only cannot reach this page at all)
+        #}
+        {% set can_manage_others = (current_user.role == 'super_admin') or
+                                   (current_user.role == 'admin' and u.role != 'super_admin') %}
+        {% set is_self = (u.id == current_user.id) %}
+        <tr data-username="{{ u.username|lower }}" data-name="{{ (u.display_name or u.username)|lower }}"
+            data-user="{{ u.to_dict()|tojson|forceescape }}">
           <td class="text-slate-400 text-xs">{{ loop.index }}</td>
           <td>
             <div class="flex items-center gap-2">
@@ -99,7 +108,7 @@
               </div>
               <div>
                 <div class="font-semibold text-slate-800 text-sm">{{ u.display_name or u.username }}</div>
-                {% if u.id == current_user.id %}
+                {% if is_self %}
                 <span class="text-xs" style="color:#3b82f6;">(you)</span>
                 {% endif %}
               </div>
@@ -129,24 +138,20 @@
           <td class="text-slate-400 text-xs">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
           <td class="text-right">
             <div class="flex items-center justify-end gap-1">
-              {# Admin cannot edit/delete Super Admin users #}
-              {% set can_manage = (current_user.role == 'super_admin') or
-                                  (current_user.role == 'admin' and u.role != 'super_admin') %}
-              {% if can_manage and u.id != current_user.id %}
-              <button class="btn btn-xs btn-outline" title="Edit"
-                      onclick="openEditModal({{ u.to_dict()|tojson }})">
+              {% if can_manage_others or is_self %}
+              {# Edit button – always shown when user has permission #}
+              <button class="btn btn-xs btn-outline edit-user-btn" title="Edit user">
                 <i class="bi bi-pencil"></i>
               </button>
-              <button class="btn btn-xs btn-outline-red" title="Delete"
-                      onclick="confirmDelete({{ u.id }}, '{{ u.username }}')">
+              {% endif %}
+              {% if can_manage_others and not is_self %}
+              {# Delete button – only for others that current user can manage #}
+              <button class="btn btn-xs btn-danger delete-user-btn" title="Delete user"
+                      data-user-id="{{ u.id }}" data-username="{{ u.username }}">
                 <i class="bi bi-trash"></i>
               </button>
-              {% elif u.id == current_user.id %}
-              <button class="btn btn-xs btn-outline" title="Edit your profile"
-                      onclick="openEditModal({{ u.to_dict()|tojson }})">
-                <i class="bi bi-pencil"></i>
-              </button>
-              {% else %}
+              {% endif %}
+              {% if not can_manage_others and not is_self %}
               <span class="text-xs text-slate-300">—</span>
               {% endif %}
             </div>
@@ -319,6 +324,26 @@
 <script>
 const CURRENT_USER_ROLE = '{{ current_user.role }}';
 const CURRENT_USER_ID   = {{ current_user.id }};
+
+// ── Event delegation for edit / delete buttons ────────────────────────────────
+document.addEventListener('DOMContentLoaded', function () {
+  document.getElementById('usersBody').addEventListener('click', function (e) {
+    const editBtn   = e.target.closest('.edit-user-btn');
+    const deleteBtn = e.target.closest('.delete-user-btn');
+
+    if (editBtn) {
+      const row  = editBtn.closest('tr');
+      const user = JSON.parse(row.dataset.user);
+      openEditModal(user);
+    }
+
+    if (deleteBtn) {
+      const userId   = parseInt(deleteBtn.dataset.userId);
+      const username = deleteBtn.dataset.username;
+      confirmDelete(userId, username);
+    }
+  });
+});
 
 // ── Search ────────────────────────────────────────────────────────────────────
 function filterUsers() {

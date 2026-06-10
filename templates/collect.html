@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Collection – Juniper CM{% endblock %}
+{% block title %}Collection – Device Backup Manager{% endblock %}
 {% block page_label %}<i class="bi bi-cloud-download mr-2 text-blue-500"></i>Config Collection{% endblock %}
 
 {% block topbar_right %}
@@ -28,8 +28,7 @@
       </div>
       <div class="text-xs text-slate-400 mt-1.5 flex items-center gap-1.5">
         <i class="bi bi-info-circle"></i>
-        Connects to every SSH-enabled device and runs
-        <code class="bg-slate-100 rounded px-1.5 py-0.5 text-slate-600">show configuration | display set | no-more</code>
+        Connects to every SSH/Telnet-enabled device and runs the appropriate backup command
       </div>
     </div>
     <div class="flex items-center gap-2">
@@ -55,10 +54,10 @@
       </div>
     </div>
     <div class="flex flex-wrap gap-2">
-      <select id="devSshFilter" class="form-input form-select" style="width:140px;" onchange="devApplyFilters()">
-        <option value="">All SSH</option>
-        <option value="enabled">Enabled</option>
-        <option value="disabled">Disabled</option>
+      <select id="devSshFilter" class="form-input form-select" style="width:150px;" onchange="devApplyFilters()">
+        <option value="">All</option>
+        <option value="enabled">Collection On</option>
+        <option value="disabled">Collection Off</option>
       </select>
       <select id="devStatusFilter" class="form-input form-select" style="width:150px;" onchange="devApplyFilters()">
         <option value="">All Status</option>
@@ -82,10 +81,11 @@
         <tr>
           <th class="sortable" data-col="0">Hostname <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
           <th class="sortable" data-col="1">IP Address <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
-          <th>SSH User</th>
-          <th class="sortable" data-col="3">Port <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
-          <th>SSH</th>
-          <th class="sortable" data-col="5">Last Collected <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
+          <th>Type</th>
+          <th>SSH/Telnet User</th>
+          <th class="sortable" data-col="4">Port <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
+          <th>Protocol</th>
+          <th class="sortable" data-col="6">Last Collected <i class="bi bi-chevron-expand text-slate-300 text-xs"></i></th>
           <th></th>
         </tr>
       </thead>
@@ -95,22 +95,31 @@
         <tr id="row-{{ d.id }}"
             data-hostname="{{ d.hostname|lower }}"
             data-ip="{{ d.ip_address }}"
-            data-ssh="{{ 'enabled' if d.ssh_enabled else 'disabled' }}"
+            data-ssh="{{ 'enabled' if (d.ssh_enabled or d.use_telnet) else 'disabled' }}"
             data-last-status="{{ last.status if last else 'never' }}"
             data-last-dt="{{ last.run_at.strftime('%Y-%m-%d %H:%M') if last else '' }}">
           <td>
             <a href="{{ url_for('device_detail', device_id=d.id) }}" class="font-semibold text-blue-600 hover:underline flex items-center gap-2 text-sm">
-              <i class="bi bi-router text-blue-400 text-xs"></i>{{ d.hostname }}
+              <i class="bi bi-{% if d.device_type == 'huawei' %}diagram-3{% else %}router{% endif %} text-blue-400 text-xs"></i>{{ d.hostname }}
             </a>
           </td>
           <td><code class="text-xs bg-slate-100 rounded px-2 py-0.5 text-slate-600">{{ d.ip_address }}</code></td>
-          <td class="text-slate-500 text-sm">{{ d.ssh_username or '—' }}</td>
-          <td class="text-slate-500 text-sm">{{ d.ssh_port or 22 }}</td>
           <td>
-            {% if d.ssh_enabled %}
-              <span class="badge badge-success"><i class="bi bi-check-circle"></i>Enabled</span>
+            {% if d.device_type == 'huawei' %}
+              <span class="badge badge-purple"><i class="bi bi-diagram-3"></i>Huawei</span>
             {% else %}
-              <span class="badge badge-neutral"><i class="bi bi-dash-circle"></i>Disabled</span>
+              <span class="badge badge-info"><i class="bi bi-router"></i>Junos</span>
+            {% endif %}
+          </td>
+          <td class="text-slate-500 text-sm">{{ d.ssh_username or '—' }}</td>
+          <td class="text-slate-500 text-sm">{{ (d.telnet_port or 23) if d.use_telnet else (d.ssh_port or 22) }}</td>
+          <td>
+            {% if d.use_telnet %}
+              <span class="badge badge-warning"><i class="bi bi-terminal"></i>Telnet</span>
+            {% elif d.ssh_enabled %}
+              <span class="badge badge-success"><i class="bi bi-shield-check"></i>SSH</span>
+            {% else %}
+              <span class="badge badge-neutral"><i class="bi bi-dash-circle"></i>None</span>
             {% endif %}
           </td>
           <td class="text-sm">
@@ -126,19 +135,19 @@
           <td class="text-right">
             <div class="flex items-center justify-end gap-1">
               <button class="btn btn-xs btn-outline" title="Collect now"
-                onclick="openWizard({{ d.id }}, '{{ d.hostname }}')"
-                {% if not d.ssh_enabled %}disabled title="SSH not enabled"{% endif %}>
+                onclick="openWizard({{ d.id }}, '{{ d.hostname }}', '{{ d.device_type }}')"
+                {% if not d.ssh_enabled and not d.use_telnet %}disabled title="No credentials configured"{% endif %}>
                 <i class="bi bi-play-fill"></i>
               </button>
-              <button class="btn btn-xs btn-outline-gray" title="SSH credentials"
-                onclick="openCredModal({{ d.id }}, '{{ d.hostname }}', '{{ d.ssh_username or '' }}', {{ d.ssh_port or 22 }}, {{ 'true' if d.ssh_enabled else 'false' }})">
+              <button class="btn btn-xs btn-outline-gray" title="Credentials"
+                onclick="openCredModal({{ d.id }}, '{{ d.hostname }}', '{{ d.ssh_username or '' }}', {{ d.ssh_port or 22 }}, {{ 'true' if d.ssh_enabled else 'false' }}, {{ d.telnet_port or 23 }}, {{ 'true' if d.use_telnet else 'false' }})">
                 <i class="bi bi-key"></i>
               </button>
             </div>
           </td>
         </tr>
         {% else %}
-        <tr id="devEmptyRow"><td colspan="7" class="text-center text-slate-400 py-8 text-sm">No devices. Add devices first.</td></tr>
+        <tr id="devEmptyRow"><td colspan="9" class="text-center text-slate-400 py-8 text-sm">No devices. Add devices first.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -295,7 +304,7 @@
 
       <!-- All devices list -->
       <div id="allSteps" class="hidden">
-        <div class="text-xs text-slate-500 mb-3">Collecting all SSH-enabled devices…</div>
+        <div class="text-xs text-slate-500 mb-3">Collecting all enabled devices (SSH + Telnet)…</div>
         <div id="allDeviceList" class="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1"></div>
       </div>
 
@@ -354,11 +363,25 @@
     <div class="p-6 flex flex-col gap-4">
       <input type="hidden" id="credDeviceId" />
       <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">SSH Username</label>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Protocol</label>
+        <div class="flex gap-3">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="credProtocol" id="credProtoSSH" value="ssh" onchange="onProtocolChange()" />
+            <span class="text-sm font-medium text-slate-700"><i class="bi bi-shield-check text-green-600"></i> SSH</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="credProtocol" id="credProtoTelnet" value="telnet" onchange="onProtocolChange()" />
+            <span class="text-sm font-medium text-slate-700"><i class="bi bi-terminal text-amber-600"></i> Telnet</span>
+          </label>
+        </div>
+        <p class="text-xs text-slate-400 mt-1">Huawei Switch → Telnet &nbsp;|&nbsp; Junos → SSH</p>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Username</label>
         <input type="text" id="credUsername" class="form-input" placeholder="admin" autocomplete="off" />
       </div>
       <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">SSH Password</label>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Password</label>
         <div class="relative">
           <input type="password" id="credPassword" class="form-input pr-10" placeholder="Leave blank to keep existing" autocomplete="new-password" />
           <button type="button" onclick="togglePwd()" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -367,17 +390,23 @@
         </div>
         <p class="text-xs text-slate-400 mt-1">Password is encrypted before storage.</p>
       </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">SSH Port</label>
-        <input type="number" id="credPort" class="form-input" value="22" min="1" max="65535" style="max-width:120px;" />
+      <div class="grid grid-cols-2 gap-4">
+        <div id="sshPortWrap">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">SSH Port</label>
+          <input type="number" id="credPort" class="form-input" value="22" min="1" max="65535" />
+        </div>
+        <div id="telnetPortWrap" class="hidden">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Telnet Port</label>
+          <input type="number" id="credTelnetPort" class="form-input" value="23" min="1" max="65535" />
+        </div>
       </div>
-      <label class="flex items-center gap-3 cursor-pointer">
+      <label id="sshEnabledWrap" class="flex items-center gap-3 cursor-pointer">
         <div class="relative">
           <input type="checkbox" id="credEnabled" class="sr-only peer" />
           <div class="w-10 h-6 bg-slate-200 rounded-full peer-checked:bg-blue-500 transition-colors"></div>
           <div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4"></div>
         </div>
-        <span class="text-sm text-slate-700">Enable SSH collection for this device</span>
+        <span class="text-sm text-slate-700" id="credEnabledLabel">Enable SSH collection for this device</span>
       </label>
       <div id="credError" class="alert alert-danger hidden"></div>
     </div>
@@ -396,17 +425,32 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 let _currentDeviceId   = null;
 let _currentDeviceName = '';
+let _currentDeviceType = 'junos';
+
+const COMMANDS = {
+  junos:  'show configuration | display set | no-more',
+  huawei: 'display current-configuration',
+};
+const PROTOCOLS = {
+  junos:  'SSH',
+  huawei: 'Telnet',
+};
 
 // ── Wizard ────────────────────────────────────────────────────────────────────
-function openWizard(deviceId, deviceName) {
+function openWizard(deviceId, deviceName, deviceType) {
   _currentDeviceId   = deviceId;
   _currentDeviceName = deviceName;
+  _currentDeviceType = deviceType || 'junos';
   resetWizard();
   document.getElementById('backupModal').classList.remove('hidden');
 }
 
 function resetWizard() {
-  const isAll = (_currentDeviceId === null);
+  const isAll    = (_currentDeviceId === null);
+  const dtype    = _currentDeviceType;
+  const cmd      = COMMANDS[dtype]  || COMMANDS.junos;
+  const protocol = PROTOCOLS[dtype] || 'SSH';
+
   document.getElementById('wizardDeviceName').textContent = _currentDeviceName;
   document.getElementById('noteSection').classList.toggle('hidden', isAll);
   document.getElementById('backupNote').value = 'manual backup';
@@ -426,8 +470,8 @@ function resetWizard() {
   document.getElementById('backupModalClose').disabled = false;
   setStepState('login',  'idle');
   setStepState('backup', 'skipped');
-  setStepMsg('login',  'SSH connect to device', 'text-slate-400');
-  setStepMsg('backup', 'Run <code class="bg-slate-100 rounded px-1">show configuration | display set | no-more</code>', 'text-slate-400');
+  setStepMsg('login',  `${protocol} connect to device`, 'text-slate-400');
+  setStepMsg('backup', `Run <code class="bg-slate-100 rounded px-1">${escHtml(cmd)}</code>`, 'text-slate-400');
   document.getElementById('label-backup').className = 'font-semibold text-sm text-slate-400';
 }
 
@@ -488,6 +532,10 @@ async function runSingleDevice(deviceId) {
   await sleep(350);
   const backup = result.backup || {};
   document.getElementById('label-backup').className = 'font-semibold text-sm text-slate-700';
+  // Update step 2 command label from API response
+  if (backup.command) {
+    setStepMsg('backup', `Run <code class="bg-slate-100 rounded px-1">${escHtml(backup.command)}</code> (${result.login.protocol || 'SSH'})`, 'text-slate-500');
+  }
 
   if (backup.status === 'success') {
     setStepState('backup', 'success');
@@ -513,7 +561,7 @@ async function runSingleDevice(deviceId) {
 // ── Collect all ───────────────────────────────────────────────────────────────
 async function runCollectAll() {
   const listEl = document.getElementById('allDeviceList');
-  listEl.innerHTML = `<div class="flex items-center gap-2 text-blue-600 text-sm"><span class="bi bi-arrow-repeat spin"></span>Connecting to all SSH-enabled devices…</div>`;
+  listEl.innerHTML = `<div class="flex items-center gap-2 text-blue-600 text-sm"><span class="bi bi-arrow-repeat spin"></span>Connecting to all enabled devices (SSH + Telnet)…</div>`;
 
   let data;
   try {
@@ -546,8 +594,8 @@ async function runCollectAll() {
   }
 
   if (results.length === 0) {
-    listEl.innerHTML = '<div class="text-slate-400 text-sm">No SSH-enabled devices found.</div>';
-    showError('Nothing to collect', 'No devices have SSH enabled. Set credentials first.');
+    listEl.innerHTML = '<div class="text-slate-400 text-sm">No devices with SSH or Telnet enabled found.</div>';
+    showError('Nothing to collect', 'No devices have SSH or Telnet enabled. Set credentials first.');
     finishWizard(false); return;
   }
 
@@ -616,26 +664,45 @@ async function triggerNow() {
 }
 
 // ── Credentials ───────────────────────────────────────────────────────────────
-function openCredModal(id, name, username, port, enabled) {
+function openCredModal(id, name, username, port, enabled, telnetPort, useTelnet) {
   document.getElementById('credDeviceId').value         = id;
   document.getElementById('credDeviceName').textContent = name;
   document.getElementById('credUsername').value         = username;
   document.getElementById('credPassword').value         = '';
   document.getElementById('credPort').value             = port;
+  document.getElementById('credTelnetPort').value       = telnetPort || 23;
   document.getElementById('credEnabled').checked        = enabled;
+  // Set protocol radio
+  document.getElementById(useTelnet ? 'credProtoTelnet' : 'credProtoSSH').checked = true;
+  onProtocolChange();
   document.getElementById('credError').classList.add('hidden');
   document.getElementById('credModal').classList.remove('hidden');
 }
 
+function onProtocolChange() {
+  const isTelnet = document.getElementById('credProtoTelnet').checked;
+  document.getElementById('sshPortWrap').classList.toggle('hidden', isTelnet);
+  document.getElementById('telnetPortWrap').classList.toggle('hidden', !isTelnet);
+  document.getElementById('credEnabledLabel').textContent =
+    isTelnet ? 'Enable Telnet collection for this device' : 'Enable SSH collection for this device';
+}
+
 async function saveCredentials() {
-  const errEl = document.getElementById('credError');
+  const errEl    = document.getElementById('credError');
   errEl.classList.add('hidden');
-  const id      = document.getElementById('credDeviceId').value;
-  const payload = {
+  const id       = document.getElementById('credDeviceId').value;
+  const isTelnet = document.getElementById('credProtoTelnet').checked;
+  const payload  = {
     ssh_username: document.getElementById('credUsername').value.trim(),
     ssh_port:     parseInt(document.getElementById('credPort').value),
-    ssh_enabled:  document.getElementById('credEnabled').checked,
+    telnet_port:  parseInt(document.getElementById('credTelnetPort').value),
+    use_telnet:   isTelnet,
+    ssh_enabled:  isTelnet ? false : document.getElementById('credEnabled').checked,
   };
+  // If telnet enabled, set ssh_enabled false and vice versa
+  if (isTelnet) {
+    payload.ssh_enabled = false;
+  }
   const pwd = document.getElementById('credPassword').value;
   if (pwd) payload.ssh_password = pwd;
   const res = await fetch(`/api/devices/${id}`, {
@@ -755,7 +822,7 @@ function devGoPage(page) {
   if (total === 0) {
     if (!noRow) {
       noRow = document.createElement('tr'); noRow.id = 'devNoResults';
-      noRow.innerHTML = '<td colspan="7" class="text-center text-slate-400 py-8 text-sm">No devices match your filters.</td>';
+      noRow.innerHTML = '<td colspan="9" class="text-center text-slate-400 py-8 text-sm">No devices match your filters.</td>';
     }
     tbody.appendChild(noRow); noRow.style.display = '';
   } else if (noRow) { noRow.style.display = 'none'; }

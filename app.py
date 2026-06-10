@@ -47,7 +47,8 @@ def load_user(user_id):
 @app.context_processor
 def inject_globals():
     now = datetime.now(TZ_DHAKA)
-    return {'now': now, 'today': now.date().isoformat()}
+    return {'now': now, 'today': now.date().isoformat(),
+            'DEVICE_TYPES': DEVICE_TYPES, 'DTYPE_JUNOS': DTYPE_JUNOS, 'DTYPE_HUAWEI': DTYPE_HUAWEI}
 
 
 # ── Role constants ─────────────────────────────────────────────────────────────
@@ -118,33 +119,55 @@ class User(UserMixin, db.Model):
         }
 
 
+# ── Device type constants ─────────────────────────────────────────────────────
+DTYPE_JUNOS   = 'junos'
+DTYPE_HUAWEI  = 'huawei'
+
+DEVICE_TYPES = {
+    DTYPE_JUNOS:  'Junos',
+    DTYPE_HUAWEI: 'Huawei Switch',
+}
+
+
 class Device(db.Model):
-    id          = db.Column(db.Integer, primary_key=True)
-    hostname    = db.Column(db.String(128), unique=True, nullable=False)
-    ip_address  = db.Column(db.String(45),  nullable=False)
-    model       = db.Column(db.String(64))
-    location    = db.Column(db.String(128))
-    description = db.Column(db.Text)
-    # SSH credentials (password stored encrypted via Fernet)
+    id           = db.Column(db.Integer, primary_key=True)
+    hostname     = db.Column(db.String(128), unique=True, nullable=False)
+    ip_address   = db.Column(db.String(45),  nullable=False)
+    device_type  = db.Column(db.String(32),  nullable=False, default=DTYPE_JUNOS)
+    model        = db.Column(db.String(64))
+    location     = db.Column(db.String(128))
+    description  = db.Column(db.Text)
+    # SSH/Telnet credentials (password stored encrypted via Fernet)
     ssh_username = db.Column(db.String(128))
     ssh_password = db.Column(db.Text)          # Fernet-encrypted
     ssh_port     = db.Column(db.Integer, default=22)
     ssh_enabled  = db.Column(db.Boolean, default=False)
-    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
-    configs     = db.relationship('Config',    backref='device', lazy=True, cascade='all, delete-orphan')
-    collect_logs= db.relationship('CollectLog', backref='device', lazy=True, cascade='all, delete-orphan')
+    # Telnet (Huawei)
+    telnet_port  = db.Column(db.Integer, default=23)
+    use_telnet   = db.Column(db.Boolean, default=False)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+    configs      = db.relationship('Config',    backref='device', lazy=True, cascade='all, delete-orphan')
+    collect_logs = db.relationship('CollectLog', backref='device', lazy=True, cascade='all, delete-orphan')
+
+    @property
+    def device_type_label(self):
+        return DEVICE_TYPES.get(self.device_type, self.device_type)
 
     def to_dict(self):
         return {
             'id':           self.id,
             'hostname':     self.hostname,
             'ip_address':   self.ip_address,
+            'device_type':  self.device_type,
+            'device_type_label': self.device_type_label,
             'model':        self.model or '',
             'location':     self.location or '',
             'description':  self.description or '',
             'ssh_username': self.ssh_username or '',
             'ssh_port':     self.ssh_port or 22,
             'ssh_enabled':  self.ssh_enabled,
+            'telnet_port':  self.telnet_port or 23,
+            'use_telnet':   self.use_telnet,
             'created_at':   self.created_at.isoformat(),
             'config_count': len(self.configs),
         }
@@ -228,14 +251,55 @@ def logout():
 @app.route('/')
 @login_required
 def index():
+    import psutil
     devices       = Device.query.order_by(Device.hostname).all()
     total_configs = Config.query.count()
     today_configs = Config.query.filter_by(config_date=today_dhaka()).count()
     recent_logs   = CollectLog.query.order_by(CollectLog.run_at.desc()).limit(20).all()
+
+    junos_count  = Device.query.filter_by(device_type=DTYPE_JUNOS).count()
+    huawei_count = Device.query.filter_by(device_type=DTYPE_HUAWEI).count()
+
+    # System metrics
+    cpu_pct  = psutil.cpu_percent(interval=0.5)
+    ram      = psutil.virtual_memory()
+    disk     = psutil.disk_usage('/')
+    sys_info = {
+        'cpu_pct':    round(cpu_pct, 1),
+        'ram_pct':    round(ram.percent, 1),
+        'ram_used':   round(ram.used  / (1024**3), 1),
+        'ram_total':  round(ram.total / (1024**3), 1),
+        'disk_pct':   round(disk.percent, 1),
+        'disk_used':  round(disk.used  / (1024**3), 1),
+        'disk_total': round(disk.total / (1024**3), 1),
+    }
+
     return render_template('index.html', devices=devices,
                            total_configs=total_configs,
                            today_configs=today_configs,
-                           recent_logs=recent_logs)
+                           recent_logs=recent_logs,
+                           junos_count=junos_count,
+                           huawei_count=huawei_count,
+                           sys_info=sys_info)
+
+
+@app.route('/api/system/stats')
+@login_required
+def api_system_stats():
+    """Live system metrics polled by the dashboard."""
+    import psutil
+    cpu_pct = psutil.cpu_percent(interval=0.5)
+    ram     = psutil.virtual_memory()
+    disk    = psutil.disk_usage('/')
+    return jsonify({
+        'cpu_pct':    round(cpu_pct, 1),
+        'ram_pct':    round(ram.percent, 1),
+        'ram_used':   round(ram.used  / (1024**3), 1),
+        'ram_total':  round(ram.total / (1024**3), 1),
+        'disk_pct':   round(disk.percent, 1),
+        'disk_used':  round(disk.used  / (1024**3), 1),
+        'disk_total': round(disk.total / (1024**3), 1),
+    })
 
 
 @app.route('/devices')
@@ -424,13 +488,19 @@ def api_create_device():
         return jsonify({'error': 'hostname and ip_address are required'}), 400
     if Device.query.filter_by(hostname=data['hostname']).first():
         return jsonify({'error': 'Device with this hostname already exists'}), 409
+    dtype = data.get('device_type', DTYPE_JUNOS)
+    if dtype not in DEVICE_TYPES:
+        return jsonify({'error': f'Invalid device_type. Choose: {list(DEVICE_TYPES.keys())}'}), 400
     device = Device(
-        hostname    = data['hostname'],
-        ip_address  = data['ip_address'],
-        model       = data.get('model', ''),
-        location    = data.get('location', ''),
-        description = data.get('description', ''),
-        ssh_port    = int(data.get('ssh_port', 22)),
+        hostname     = data['hostname'],
+        ip_address   = data['ip_address'],
+        device_type  = dtype,
+        model        = data.get('model', ''),
+        location     = data.get('location', ''),
+        description  = data.get('description', ''),
+        ssh_port     = int(data.get('ssh_port', 22)),
+        telnet_port  = int(data.get('telnet_port', 23)),
+        use_telnet   = bool(data.get('use_telnet', False)),
     )
     _set_credentials(device, data)
     db.session.add(device)
@@ -447,6 +517,10 @@ def api_update_device(device_id):
     for field in ('hostname', 'ip_address', 'model', 'location', 'description'):
         if field in data:
             setattr(device, field, data[field])
+    if 'device_type' in data:
+        if data['device_type'] not in DEVICE_TYPES:
+            return jsonify({'error': f'Invalid device_type'}), 400
+        device.device_type = data['device_type']
     if 'ssh_port' in data:
         device.ssh_port = int(data['ssh_port'])
     _set_credentials(device, data)
@@ -464,17 +538,185 @@ def api_delete_device(device_id):
     return jsonify({'message': 'Device deleted'})
 
 
+# ── API: Device CSV Export ────────────────────────────────────────────────────
+
+@app.route('/api/devices/export.csv', methods=['GET'])
+@login_required
+@roles_required(ROLE_SUPER_ADMIN, ROLE_ADMIN)
+def api_export_devices():
+    """Export all devices as a CSV file."""
+    import csv
+    import io
+    from flask import Response
+
+    devices = Device.query.order_by(Device.hostname).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    # Header row
+    writer.writerow([
+        'hostname', 'ip_address', 'device_type', 'model',
+        'location', 'description', 'ssh_username',
+        'ssh_port', 'telnet_port', 'use_telnet', 'ssh_enabled',
+    ])
+    for d in devices:
+        writer.writerow([
+            d.hostname,
+            d.ip_address,
+            d.device_type,
+            d.model or '',
+            d.location or '',
+            d.description or '',
+            d.ssh_username or '',
+            d.ssh_port or 22,
+            d.telnet_port or 23,
+            '1' if d.use_telnet else '0',
+            '1' if d.ssh_enabled else '0',
+        ])
+
+    csv_bytes = output.getvalue().encode('utf-8-sig')  # BOM for Excel compatibility
+    return Response(
+        csv_bytes,
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename="devices_export.csv"'},
+    )
+
+
+# ── API: Device CSV Import ────────────────────────────────────────────────────
+
+@app.route('/api/devices/import', methods=['POST'])
+@login_required
+@roles_required(ROLE_SUPER_ADMIN, ROLE_ADMIN)
+def api_import_devices():
+    """
+    Import devices from a CSV file.
+    Required columns : hostname, ip_address
+    Optional columns : device_type, model, location, description,
+                       ssh_username, ssh_port, telnet_port, use_telnet, ssh_enabled
+    Behaviour: existing hostname → update; new hostname → insert.
+    """
+    import csv
+    import io
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded.'}), 400
+
+    f = request.files['file']
+    if not f.filename.lower().endswith('.csv'):
+        return jsonify({'error': 'Only .csv files are accepted.'}), 400
+
+    try:
+        content = f.read().decode('utf-8-sig')   # handle BOM
+    except Exception:
+        return jsonify({'error': 'Could not decode file. Make sure it is UTF-8.'}), 400
+
+    reader = csv.DictReader(io.StringIO(content))
+    # Normalise header names (strip whitespace, lowercase)
+    if reader.fieldnames is None:
+        return jsonify({'error': 'CSV file appears to be empty.'}), 400
+
+    required = {'hostname', 'ip_address'}
+    headers  = {h.strip().lower() for h in reader.fieldnames}
+    missing  = required - headers
+    if missing:
+        return jsonify({'error': f'Missing required columns: {", ".join(sorted(missing))}'}), 400
+
+    inserted = 0
+    updated  = 0
+    errors   = []
+
+    for row_num, raw_row in enumerate(reader, start=2):   # row 1 = header
+        row = {k.strip().lower(): (v or '').strip() for k, v in raw_row.items()}
+
+        hostname   = row.get('hostname', '').strip()
+        ip_address = row.get('ip_address', '').strip()
+
+        if not hostname or not ip_address:
+            errors.append(f'Row {row_num}: hostname and ip_address are required.')
+            continue
+
+        device_type = row.get('device_type', DTYPE_JUNOS).strip()
+        if device_type not in DEVICE_TYPES:
+            device_type = DTYPE_JUNOS
+
+        try:
+            ssh_port    = int(row.get('ssh_port', 22) or 22)
+            telnet_port = int(row.get('telnet_port', 23) or 23)
+        except ValueError:
+            errors.append(f'Row {row_num}: ssh_port / telnet_port must be integers.')
+            continue
+
+        use_telnet  = row.get('use_telnet', '0') in ('1', 'true', 'yes')
+        ssh_enabled = row.get('ssh_enabled', '0') in ('1', 'true', 'yes')
+
+        existing = Device.query.filter_by(hostname=hostname).first()
+        if existing:
+            existing.ip_address  = ip_address
+            existing.device_type = device_type
+            existing.model       = row.get('model', existing.model or '')
+            existing.location    = row.get('location', existing.location or '')
+            existing.description = row.get('description', existing.description or '')
+            existing.ssh_port    = ssh_port
+            existing.telnet_port = telnet_port
+            existing.use_telnet  = use_telnet
+            if row.get('ssh_username'):
+                existing.ssh_username = row['ssh_username']
+                existing.ssh_enabled  = True
+            else:
+                existing.ssh_enabled = ssh_enabled
+            updated += 1
+        else:
+            device = Device(
+                hostname    = hostname,
+                ip_address  = ip_address,
+                device_type = device_type,
+                model       = row.get('model', ''),
+                location    = row.get('location', ''),
+                description = row.get('description', ''),
+                ssh_username= row.get('ssh_username', ''),
+                ssh_port    = ssh_port,
+                telnet_port = telnet_port,
+                use_telnet  = use_telnet,
+                ssh_enabled = ssh_enabled or bool(row.get('ssh_username')),
+            )
+            db.session.add(device)
+            inserted += 1
+
+    if errors and inserted == 0 and updated == 0:
+        return jsonify({'error': 'No valid rows found.', 'row_errors': errors}), 400
+
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({'error': f'Database error: {exc}'}), 500
+
+    return jsonify({
+        'inserted':   inserted,
+        'updated':    updated,
+        'row_errors': errors,
+        'message':    f'Import complete: {inserted} added, {updated} updated'
+                      + (f', {len(errors)} row(s) skipped.' if errors else '.'),
+    })
+
+
 def _set_credentials(device, data):
-    """Encrypt and store SSH credentials if provided."""
+    """Encrypt and store SSH/Telnet credentials if provided."""
     from crypto_utils import encrypt_password
     if data.get('ssh_username'):
         device.ssh_username = data['ssh_username']
-        device.ssh_enabled  = True
     if data.get('ssh_password'):
         device.ssh_password = encrypt_password(data['ssh_password'])
-        device.ssh_enabled  = True
     if 'ssh_enabled' in data:
         device.ssh_enabled = bool(data['ssh_enabled'])
+    if 'telnet_port' in data:
+        device.telnet_port = int(data['telnet_port'])
+    if 'use_telnet' in data:
+        device.use_telnet = bool(data['use_telnet'])
+    # Auto-enable SSH/Telnet when credentials provided
+    if data.get('ssh_username') or data.get('ssh_password'):
+        if not device.use_telnet:
+            device.ssh_enabled = True
 
 
 # ── API: Configs ──────────────────────────────────────────────────────────────
@@ -579,9 +821,11 @@ def api_collect_manual(device_id):
     steps = ssh_collect_steps(
         hostname     = device.hostname,
         ip           = device.ip_address,
-        port         = device.ssh_port or 22,
+        port         = (device.telnet_port or 23) if device.use_telnet else (device.ssh_port or 22),
         username     = device.ssh_username or '',
         enc_password = device.ssh_password or '',
+        device_type  = device.device_type or DTYPE_JUNOS,
+        use_telnet   = device.use_telnet,
     )
 
     backup = steps['backup']
@@ -624,27 +868,35 @@ def api_collect_run():
 
 def run_collection_job(device_id: int | None = None) -> list[dict]:
     """
-    Bulk SSH collection. Called from the route above AND from the scheduler.
-    SSH is done in parallel threads; DB writes are serialised in the calling
+    Bulk SSH/Telnet collection. Called from the route above AND from the scheduler.
+    Collects all devices that have ssh_enabled=True OR use_telnet=True.
+    SSH/Telnet is done in parallel threads; DB writes are serialised in the calling
     thread's app context to avoid SQLite "database is locked" errors.
     """
     import threading
     from collector import ssh_collect
+    from sqlalchemy import or_
 
-    query   = Device.query.filter_by(ssh_enabled=True)
+    # Include both SSH-enabled and Telnet-enabled devices
+    query = Device.query.filter(
+        or_(Device.ssh_enabled == True, Device.use_telnet == True)
+    )
     if device_id:
         query = query.filter_by(id=device_id)
     devices = query.order_by(Device.hostname).all()
 
     if not devices:
-        logger.info('run_collection_job: no SSH-enabled devices found')
-        return [{'status': 'skipped', 'message': 'No SSH-enabled devices found'}]
+        logger.info('run_collection_job: no enabled devices found')
+        return [{'status': 'skipped', 'message': 'No devices with SSH or Telnet enabled'}]
 
     # Flatten to plain dicts – ORM objects must not cross thread boundaries
     rows = [
         {'id': d.id, 'hostname': d.hostname, 'ip_address': d.ip_address,
          'ssh_port': d.ssh_port or 22, 'ssh_username': d.ssh_username or '',
-         'ssh_password': d.ssh_password or ''}
+         'ssh_password': d.ssh_password or '',
+         'device_type': d.device_type or DTYPE_JUNOS,
+         'use_telnet': d.use_telnet,
+         'telnet_port': d.telnet_port or 23}
         for d in devices
     ]
 
@@ -656,9 +908,11 @@ def run_collection_job(device_id: int | None = None) -> list[dict]:
         res = ssh_collect(
             hostname     = row['hostname'],
             ip           = row['ip_address'],
-            port         = row['ssh_port'],
+            port         = (row['telnet_port']) if row['use_telnet'] else row['ssh_port'],
             username     = row['ssh_username'],
             enc_password = row['ssh_password'],
+            device_type  = row['device_type'],
+            use_telnet   = row['use_telnet'],
         )
         with lock:
             ssh_results[row['id']] = res

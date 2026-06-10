@@ -1,11 +1,25 @@
 {% extends 'base.html' %}
-{% block title %}Devices – Juniper CM{% endblock %}
+{% block title %}Devices – Device Backup Manager{% endblock %}
 {% block page_label %}<i class="bi bi-hdd-network mr-2 text-blue-500"></i>Devices{% endblock %}
 
 {% block topbar_right %}
-<button class="btn btn-sm btn-primary" onclick="document.getElementById('addDeviceModal').classList.remove('hidden')">
-  <i class="bi bi-plus-lg"></i>Add Device
-</button>
+{% if current_user.role in ('super_admin', 'admin') %}
+<div class="flex items-center gap-2">
+  <a href="/api/devices/export.csv"
+     class="btn btn-sm btn-outline-gray"
+     title="Export all devices to CSV">
+    <i class="bi bi-download"></i> Export CSV
+  </a>
+  <button class="btn btn-sm btn-outline"
+          onclick="document.getElementById('importModal').classList.remove('hidden')"
+          title="Import devices from CSV">
+    <i class="bi bi-upload"></i> Import CSV
+  </button>
+  <button class="btn btn-sm btn-primary" onclick="document.getElementById('addDeviceModal').classList.remove('hidden')">
+    <i class="bi bi-plus-lg"></i>Add Device
+  </button>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -206,10 +220,15 @@
     <i class="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
     <input type="text" id="cardSearch" class="form-input pl-8 text-sm" placeholder="Search hostname, IP, model…" oninput="filterCards()" />
   </div>
-  <select id="sshFilter" class="form-input form-select text-sm" style="width:150px;" onchange="filterCards()">
-    <option value="">All SSH Status</option>
-    <option value="enabled">SSH Enabled</option>
-    <option value="disabled">SSH Disabled</option>
+  <select id="typeFilter" class="form-input form-select text-sm" style="width:170px;" onchange="filterCards()">
+    <option value="">All Device Types</option>
+    <option value="junos">Juniper (Junos)</option>
+    <option value="huawei">Huawei Switch</option>
+  </select>
+  <select id="sshFilter" class="form-input form-select text-sm" style="width:175px;" onchange="filterCards()">
+    <option value="">All Collection Status</option>
+    <option value="enabled">Collection Enabled</option>
+    <option value="disabled">Collection Disabled</option>
   </select>
   <select id="sortBy" class="form-input form-select text-sm" style="width:160px;" onchange="filterCards()">
     <option value="name">Sort: Name A–Z</option>
@@ -231,7 +250,8 @@
        data-hostname="{{ d.hostname|lower }}"
        data-ip="{{ d.ip_address }}"
        data-model="{{ (d.model or '')|lower }}"
-       data-ssh="{{ 'enabled' if d.ssh_enabled else 'disabled' }}"
+       data-ssh="{{ 'enabled' if (d.ssh_enabled or d.use_telnet) else 'disabled' }}"
+       data-device-type="{{ d.device_type }}"
        data-configs="{{ d.configs|length }}"
        data-created="{{ d.created_at.isoformat() }}">
 
@@ -242,10 +262,9 @@
         <!-- Device icon with colored bg -->
         <div class="node-icon"
              style="background:linear-gradient(135deg,
-               {% set colors = ['#1d4ed8,#3b82f6','#0369a1,#0ea5e9','#0f766e,#14b8a6','#7c3aed,#a78bfa','#be185d,#f472b6','#b45309,#f59e0b','#15803d,#22c55e','#9a3412,#f97316'] %}
-               {% set ci = loop.index0 % 8 %}
-               {{ colors[ci] }});">
-          <i class="bi bi-router text-white" style="font-size:1.3rem;position:relative;z-index:1;"></i>
+               {% if d.device_type == 'huawei' %}#be185d,#f472b6
+               {% else %}#1d4ed8,#3b82f6{% endif %});">
+          <i class="bi bi-{% if d.device_type == 'huawei' %}diagram-3{% else %}router{% endif %} text-white" style="font-size:1.3rem;position:relative;z-index:1;"></i>
         </div>
 
         <!-- Hostname & IP -->
@@ -256,14 +275,24 @@
                onmouseover="this.style.color='#1d4ed8'" onmouseout="this.style.color='#0f172a'">
               {{ d.hostname }}
             </a>
+            <!-- Device type badge -->
+            {% if d.device_type == 'huawei' %}
+            <span style="display:inline-flex;align-items:center;gap:4px;background:#fdf2f8;color:#be185d;border:1px solid #fbcfe8;border-radius:999px;padding:2px 8px;font-size:.65rem;font-weight:700;letter-spacing:.04em;">
+              <i class="bi bi-diagram-3" style="font-size:.65rem;"></i>Huawei
+            </span>
+            {% else %}
+            <span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:2px 8px;font-size:.65rem;font-weight:700;letter-spacing:.04em;">
+              <i class="bi bi-router" style="font-size:.65rem;"></i>Junos
+            </span>
+            {% endif %}
             <!-- SSH status pill -->
-            {% if d.ssh_enabled %}
+            {% if d.ssh_enabled or d.use_telnet %}
             <span style="display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:999px;padding:2px 8px;font-size:.65rem;font-weight:700;letter-spacing:.04em;">
-              <span class="status-dot online"></span>SSH
+              <span class="status-dot online"></span>{{ 'TELNET' if d.use_telnet else 'SSH' }}
             </span>
             {% else %}
             <span style="display:inline-flex;align-items:center;gap:4px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;border-radius:999px;padding:2px 8px;font-size:.65rem;font-weight:700;letter-spacing:.04em;">
-              <span class="status-dot offline"></span>NO SSH
+              <span class="status-dot offline"></span>NO CONN
             </span>
             {% endif %}
           </div>
@@ -306,10 +335,10 @@
       {% endif %}
 
       <div class="info-row">
-        <i class="bi bi-key-fill" style="color:#f59e0b;font-size:.8rem;width:16px;flex-shrink:0;"></i>
-        <span class="lbl">SSH User</span>
+        <i class="bi bi-{% if d.use_telnet %}terminal{% else %}shield-check{% endif %}" style="color:{% if d.use_telnet %}#d97706{% else %}#22c55e{% endif %};font-size:.8rem;width:16px;flex-shrink:0;"></i>
+        <span class="lbl">{% if d.use_telnet %}Telnet User{% else %}SSH User{% endif %}</span>
         {% if d.ssh_username %}
-          <span class="val"><code style="font-size:.75rem;background:#f1f5f9;padding:1px 6px;border-radius:4px;color:#334155;">{{ d.ssh_username }}</code>:{{ d.ssh_port or 22 }}</span>
+          <span class="val"><code style="font-size:.75rem;background:#f1f5f9;padding:1px 6px;border-radius:4px;color:#334155;">{{ d.ssh_username }}</code>:{{ (d.telnet_port or 23) if d.use_telnet else (d.ssh_port or 22) }}</span>
         {% else %}
           <span style="font-size:.75rem;color:#cbd5e1;font-style:italic;">Not configured</span>
         {% endif %}
@@ -364,7 +393,7 @@
         <i class="bi bi-layout-text-sidebar-reverse"></i>Details
       </a>
       <a href="{{ url_for('collect_page') }}" class="card-act-btn backup"
-         {% if not d.ssh_enabled %}style="opacity:.4;pointer-events:none;cursor:not-allowed;"{% endif %}>
+         {% if not d.ssh_enabled and not d.use_telnet %}style="opacity:.4;pointer-events:none;cursor:not-allowed;"{% endif %}>
         <i class="bi bi-cloud-download"></i>Collect
       </a>
       <button class="card-act-btn edit"
@@ -375,6 +404,9 @@
               data-model="{{ (d.model or '') | e }}"
               data-location="{{ (d.location or '') | e }}"
               data-desc="{{ (d.description or '') | e }}"
+              data-device-type="{{ d.device_type }}"
+              data-use-telnet="{{ 'true' if d.use_telnet else 'false' }}"
+              data-telnet-port="{{ d.telnet_port or 23 }}"
               onclick="openEditModal(this)">
         <i class="bi bi-pencil"></i>
       </button>
@@ -433,6 +465,13 @@
     <div class="p-6 flex flex-col gap-4">
       <input type="hidden" id="edit_device_id" />
       <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Device Type <span class="text-red-500">*</span></label>
+        <select id="edit_device_type" class="form-input form-select" onchange="onEditTypeChange()">
+          <option value="junos">Junos (Juniper)</option>
+          <option value="huawei">Huawei Switch</option>
+        </select>
+      </div>
+      <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Hostname <span class="text-red-500">*</span></label>
         <input type="text" id="edit_hostname" class="form-input" placeholder="router-01" />
       </div>
@@ -443,7 +482,7 @@
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Model</label>
-          <input type="text" id="edit_model" class="form-input" placeholder="MX480" />
+          <input type="text" id="edit_model" class="form-input" placeholder="MX480 / S5700" />
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Location</label>
@@ -482,6 +521,13 @@
     </div>
     <div class="p-6 flex flex-col gap-4">
       <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Device Type <span class="text-red-500">*</span></label>
+        <select id="dev_device_type" class="form-input form-select" onchange="onAddTypeChange()">
+          <option value="junos">Junos (Juniper)</option>
+          <option value="huawei">Huawei Switch</option>
+        </select>
+      </div>
+      <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Hostname <span class="text-red-500">*</span></label>
         <input type="text" id="dev_hostname" class="form-input" placeholder="router-01" />
       </div>
@@ -492,7 +538,7 @@
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Model</label>
-          <input type="text" id="dev_model" class="form-input" placeholder="MX480" />
+          <input type="text" id="dev_model" class="form-input" placeholder="MX480 / S5700" />
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Location</label>
@@ -503,11 +549,115 @@
         <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Description</label>
         <textarea id="dev_desc" class="form-input" rows="2" placeholder="Optional description…"></textarea>
       </div>
+      <!-- Huawei-only: telnet hint -->
+      <div id="dev_telnet_hint" class="hidden">
+        <div class="alert alert-info" style="padding:10px 14px;">
+          <i class="bi bi-info-circle"></i>
+          <span class="text-xs">Huawei Switch uses <strong>Telnet</strong> (port 23) by default. You can configure credentials after adding the device via the <i class="bi bi-key"></i> button in Collection.</span>
+        </div>
+      </div>
       <div id="addDeviceError" class="alert alert-danger hidden"></div>
     </div>
     <div class="flex justify-end gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
       <button onclick="document.getElementById('addDeviceModal').classList.add('hidden')" class="btn btn-secondary">Cancel</button>
       <button id="saveDeviceBtn" class="btn btn-primary"><i class="bi bi-save"></i>Save Device</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     IMPORT CSV MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="importModal" class="modal-overlay hidden">
+  <div class="modal-box" style="max-width:600px;">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid #f1f5f9;">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:linear-gradient(135deg,#1d4ed8,#38bdf8);">
+          <i class="bi bi-upload text-white"></i>
+        </div>
+        <div>
+          <h5 class="font-semibold text-slate-800 leading-tight">Import Devices from CSV</h5>
+          <p class="text-xs text-slate-400">Add or update devices in bulk</p>
+        </div>
+      </div>
+      <button onclick="closeImportModal()"
+              class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+
+    <div class="p-6 flex flex-col gap-5">
+
+      <!-- Format hint -->
+      <div class="alert alert-info" style="align-items:flex-start;flex-direction:column;gap:8px;">
+        <div class="flex items-center gap-2 font-semibold text-sm">
+          <i class="bi bi-info-circle"></i> CSV Format Guide
+        </div>
+        <div class="text-xs" style="line-height:1.7;">
+          <strong>Required columns:</strong> <code>hostname</code>, <code>ip_address</code><br>
+          <strong>Optional columns:</strong> <code>device_type</code> (junos / huawei), <code>model</code>,
+          <code>location</code>, <code>description</code>, <code>ssh_username</code>,
+          <code>ssh_port</code>, <code>telnet_port</code>, <code>use_telnet</code> (0/1), <code>ssh_enabled</code> (0/1)<br>
+          <strong>Behaviour:</strong> Existing hostnames are <em>updated</em>; new hostnames are <em>inserted</em>.
+        </div>
+        <button onclick="downloadTemplate()" class="btn btn-xs btn-outline" style="margin-top:2px;">
+          <i class="bi bi-file-earmark-arrow-down"></i> Download Template
+        </button>
+      </div>
+
+      <!-- Drop zone -->
+      <div id="dropZone"
+           style="border:2px dashed #bfdbfe;border-radius:12px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s;background:#f8fafc;"
+           ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
+           onclick="document.getElementById('csvFileInput').click()">
+        <i class="bi bi-cloud-upload" style="font-size:2.2rem;color:#93c5fd;display:block;margin-bottom:8px;"></i>
+        <p class="font-semibold text-slate-600 text-sm mb-1">Drop your CSV file here</p>
+        <p class="text-xs text-slate-400">or click to browse</p>
+        <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="onFileSelect(event)" />
+      </div>
+
+      <!-- Selected file info -->
+      <div id="fileInfo" class="hidden" style="display:none;align-items:center;gap:12px;border-radius:10px;padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;">
+        <i class="bi bi-file-earmark-spreadsheet" style="color:#15803d;font-size:1.4rem;flex-shrink:0;"></i>
+        <div style="flex:1;min-width:0;">
+          <p class="text-sm font-semibold text-slate-800" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="fileName"></p>
+          <p class="text-xs text-slate-400" id="fileSize"></p>
+        </div>
+        <button onclick="clearFile()" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.1rem;" title="Remove file">
+          <i class="bi bi-x-circle"></i>
+        </button>
+      </div>
+
+      <!-- Preview table -->
+      <div id="previewSection" class="hidden">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+            Preview — <span id="previewCount" class="text-blue-500"></span>
+          </p>
+          <span class="text-xs text-slate-400">Showing first 5 rows</span>
+        </div>
+        <div class="overflow-x-auto rounded-lg" style="border:1px solid #e2e8f0;max-height:200px;overflow-y:auto;">
+          <table class="w-full" style="font-size:.74rem;border-collapse:collapse;">
+            <thead id="previewHead" style="background:#f8fafc;position:sticky;top:0;"></thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Parse error -->
+      <div id="parseError" class="alert alert-danger hidden"></div>
+      <!-- Import result -->
+      <div id="importResult" class="hidden"></div>
+
+    </div>
+
+    <div class="flex justify-end gap-3 px-6 py-4" style="border-top:1px solid #f1f5f9;">
+      <button onclick="closeImportModal()" class="btn btn-secondary">Cancel</button>
+      <button id="importBtn" class="btn btn-primary" onclick="submitImport()" disabled>
+        <i class="bi bi-upload"></i> Import
+      </button>
     </div>
   </div>
 </div>
@@ -520,6 +670,7 @@
 function openEditModal(btn) {
   const d = btn.dataset;
   document.getElementById('edit_device_id').value      = d.id;
+  document.getElementById('edit_device_type').value    = d.deviceType || 'junos';
   document.getElementById('edit_hostname').value       = d.hostname;
   document.getElementById('edit_ip').value             = d.ip;
   document.getElementById('edit_model').value          = d.model;
@@ -530,16 +681,21 @@ function openEditModal(btn) {
   document.getElementById('editDeviceModal').classList.remove('hidden');
 }
 
+function onEditTypeChange() {
+  // Future: could show/hide type-specific fields
+}
+
 document.getElementById('saveEditBtn').addEventListener('click', async () => {
   const errEl = document.getElementById('editDeviceError');
   errEl.classList.add('hidden');
   const id = document.getElementById('edit_device_id').value;
   const payload = {
-    hostname:    document.getElementById('edit_hostname').value.trim(),
-    ip_address:  document.getElementById('edit_ip').value.trim(),
-    model:       document.getElementById('edit_model').value.trim(),
-    location:    document.getElementById('edit_location').value.trim(),
-    description: document.getElementById('edit_desc').value.trim(),
+    hostname:     document.getElementById('edit_hostname').value.trim(),
+    ip_address:   document.getElementById('edit_ip').value.trim(),
+    device_type:  document.getElementById('edit_device_type').value,
+    model:        document.getElementById('edit_model').value.trim(),
+    location:     document.getElementById('edit_location').value.trim(),
+    description:  document.getElementById('edit_desc').value.trim(),
   };
   if (!payload.hostname || !payload.ip_address) {
     errEl.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Hostname and IP address are required.';
@@ -563,15 +719,26 @@ document.getElementById('saveEditBtn').addEventListener('click', async () => {
 });
 
 // ── Add device ────────────────────────────────────────────────────────────────
+function onAddTypeChange() {
+  const t = document.getElementById('dev_device_type').value;
+  document.getElementById('dev_telnet_hint').classList.toggle('hidden', t !== 'huawei');
+}
+
 document.getElementById('saveDeviceBtn').addEventListener('click', async () => {
   const errEl = document.getElementById('addDeviceError');
   errEl.classList.add('hidden');
+  const dtype = document.getElementById('dev_device_type').value;
   const payload = {
-    hostname:    document.getElementById('dev_hostname').value.trim(),
-    ip_address:  document.getElementById('dev_ip').value.trim(),
-    model:       document.getElementById('dev_model').value.trim(),
-    location:    document.getElementById('dev_location').value.trim(),
-    description: document.getElementById('dev_desc').value.trim(),
+    hostname:     document.getElementById('dev_hostname').value.trim(),
+    ip_address:   document.getElementById('dev_ip').value.trim(),
+    device_type:  dtype,
+    model:        document.getElementById('dev_model').value.trim(),
+    location:     document.getElementById('dev_location').value.trim(),
+    description:  document.getElementById('dev_desc').value.trim(),
+    // Default: Huawei uses telnet, Junos uses SSH
+    use_telnet:   dtype === 'huawei',
+    ssh_port:     22,
+    telnet_port:  23,
   };
   if (!payload.hostname || !payload.ip_address) {
     errEl.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Hostname and IP address are required.';
@@ -599,20 +766,21 @@ async function deleteDevice(id, hostname) {
 function filterCards() {
   const q      = (document.getElementById('cardSearch').value || '').toLowerCase().trim();
   const sshF   = document.getElementById('sshFilter').value;
+  const typeF  = document.getElementById('typeFilter').value;
   const sortBy = document.getElementById('sortBy').value;
 
   const grid  = document.getElementById('cardsGrid');
   const cards = Array.from(grid.querySelectorAll('.device-card'));
   let visible = 0;
 
-  // Filter
   cards.forEach(card => {
-    const matchQ   = !q || card.dataset.hostname.includes(q)
-                       || card.dataset.ip.includes(q)
-                       || card.dataset.model.includes(q);
-    const matchSsh = !sshF || card.dataset.ssh === sshF;
-    card.style.display = (matchQ && matchSsh) ? '' : 'none';
-    if (matchQ && matchSsh) visible++;
+    const matchQ    = !q     || card.dataset.hostname.includes(q)
+                               || card.dataset.ip.includes(q)
+                               || card.dataset.model.includes(q);
+    const matchSsh  = !sshF  || card.dataset.ssh === sshF;
+    const matchType = !typeF || card.dataset.deviceType === typeF;
+    card.style.display = (matchQ && matchSsh && matchType) ? '' : 'none';
+    if (matchQ && matchSsh && matchType) visible++;
   });
 
   // Sort visible cards
@@ -647,5 +815,209 @@ document.getElementById('addDeviceModal').addEventListener('click', function(e) 
 document.getElementById('editDeviceModal').addEventListener('click', function(e) {
   if (e.target === this) this.classList.add('hidden');
 });
+document.getElementById('importModal').addEventListener('click', function(e) {
+  if (e.target === this) closeImportModal();
+});
+
+// ── CSV Import ────────────────────────────────────────────────────────────────
+let _importFile = null;
+let _parsedRows = [];
+
+function closeImportModal() {
+  document.getElementById('importModal').classList.add('hidden');
+  clearFile();
+  document.getElementById('importResult').classList.add('hidden');
+  document.getElementById('importResult').innerHTML = '';
+}
+
+// Drag-and-drop handlers
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').style.borderColor = '#3b82f6';
+  document.getElementById('dropZone').style.background  = '#eff6ff';
+}
+function onDragLeave(e) {
+  document.getElementById('dropZone').style.borderColor = '#bfdbfe';
+  document.getElementById('dropZone').style.background  = '#f8fafc';
+}
+function onDrop(e) {
+  e.preventDefault();
+  onDragLeave(e);
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+}
+function onFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+}
+
+function processFile(file) {
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    showParseError('Only .csv files are accepted.');
+    return;
+  }
+  _importFile = file;
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileSize').textContent = (file.size / 1024).toFixed(1) + ' KB';
+  const fi = document.getElementById('fileInfo');
+  fi.classList.remove('hidden');
+  fi.style.display = 'flex';
+  hideParseError();
+  document.getElementById('importResult').classList.add('hidden');
+
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      parseCSVPreview(ev.target.result);
+    } catch(err) {
+      showParseError('Could not parse file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function clearFile() {
+  _importFile = null;
+  _parsedRows = [];
+  document.getElementById('csvFileInput').value = '';
+  const fi = document.getElementById('fileInfo');
+  fi.classList.add('hidden');
+  fi.style.display = 'none';
+  document.getElementById('previewSection').classList.add('hidden');
+  document.getElementById('importBtn').disabled = true;
+  hideParseError();
+}
+
+function parseCSVPreview(text) {
+  // Simple CSV parser (handles quoted fields)
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
+  if (lines.length < 2) { showParseError('CSV must have a header row and at least one data row.'); return; }
+
+  const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+  if (!headers.includes('hostname') || !headers.includes('ip_address')) {
+    showParseError('CSV is missing required columns: hostname and/or ip_address.');
+    return;
+  }
+
+  _parsedRows = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const values = parseCSVLine(lines[i]);
+    const row = {};
+    headers.forEach((h, idx) => { row[h] = (values[idx] || '').trim(); });
+    _parsedRows.push(row);
+  }
+
+  // Build preview table
+  const thead = document.getElementById('previewHead');
+  const tbody = document.getElementById('previewBody');
+  const thStyle = 'padding:8px 12px;font-size:.7rem;font-weight:600;color:#64748b;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid #e2e8f0;';
+  const tdStyle = 'padding:7px 12px;font-size:.74rem;color:#334155;white-space:nowrap;border-bottom:1px solid #f1f5f9;';
+
+  thead.innerHTML = '<tr>' + headers.map(h => `<th style="${thStyle}">${h}</th>`).join('') + '</tr>';
+  const preview = _parsedRows.slice(0, 5);
+  tbody.innerHTML = preview.map(row =>
+    '<tr>' + headers.map(h => `<td style="${tdStyle}">${escHtml(row[h] || '')}</td>`).join('') + '</tr>'
+  ).join('');
+
+  document.getElementById('previewCount').textContent =
+    `${_parsedRows.length} row${_parsedRows.length !== 1 ? 's' : ''} detected`;
+  document.getElementById('previewSection').classList.remove('hidden');
+  document.getElementById('importBtn').disabled = false;
+  hideParseError();
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let cur = '', inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuote && line[i+1] === '"') { cur += '"'; i++; }
+      else inQuote = !inQuote;
+    } else if (ch === ',' && !inQuote) {
+      result.push(cur); cur = '';
+    } else { cur += ch; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function showParseError(msg) {
+  const el = document.getElementById('parseError');
+  el.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${msg}`;
+  el.classList.remove('hidden');
+  document.getElementById('importBtn').disabled = true;
+}
+function hideParseError() {
+  document.getElementById('parseError').classList.add('hidden');
+}
+
+async function submitImport() {
+  if (!_importFile) return;
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"><i class="bi bi-arrow-repeat"></i></span> Importing…';
+  hideParseError();
+
+  const fd = new FormData();
+  fd.append('file', _importFile);
+
+  try {
+    const res  = await fetch('/api/devices/import', { method: 'POST', body: fd });
+    const data = await res.json();
+    const el   = document.getElementById('importResult');
+    el.classList.remove('hidden');
+
+    if (res.ok) {
+      let html = `<div class="alert alert-success">
+        <i class="bi bi-check-circle-fill"></i>
+        <div>
+          <p class="font-semibold">${data.message}</p>
+          ${data.row_errors && data.row_errors.length
+            ? `<ul class="mt-2 text-xs" style="list-style:disc;padding-left:16px;">
+                ${data.row_errors.map(e => `<li>${escHtml(e)}</li>`).join('')}
+               </ul>` : ''}
+        </div>
+      </div>`;
+      el.innerHTML = html;
+      // Reload after a short delay so user can see the result
+      setTimeout(() => location.reload(), 1800);
+    } else {
+      let html = `<div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle"></i>
+        <div>
+          <p class="font-semibold">${escHtml(data.error || 'Import failed.')}</p>
+          ${data.row_errors && data.row_errors.length
+            ? `<ul class="mt-2 text-xs" style="list-style:disc;padding-left:16px;">
+                ${data.row_errors.map(e => `<li>${escHtml(e)}</li>`).join('')}
+               </ul>` : ''}
+        </div>
+      </div>`;
+      el.innerHTML = html;
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-upload"></i> Import';
+    }
+  } catch(err) {
+    showParseError('Network error: ' + err.message);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-upload"></i> Import';
+  }
+}
+
+// ── CSV Template download ─────────────────────────────────────────────────────
+function downloadTemplate() {
+  const header = 'hostname,ip_address,device_type,model,location,description,ssh_username,ssh_port,telnet_port,use_telnet,ssh_enabled';
+  const sample = 'router-01,192.168.1.1,junos,MX480,DC-1 Rack 3,Core router,admin,22,23,0,1\nswitch-01,10.0.0.1,huawei,S5700,DC-2 Row 1,Access switch,,22,23,1,0';
+  const blob = new Blob([header + '\n' + sample], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'devices_template.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
 </script>
 {% endblock %}

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ device.hostname }} – Juniper CM{% endblock %}
+{% block title %}{{ device.hostname }} – Device Backup Manager{% endblock %}
 {% block page_label %}
   <div class="breadcrumb">
     <a href="{{ url_for('devices') }}">Devices</a>
@@ -29,8 +29,18 @@
       <h4 class="text-xl font-bold text-slate-800 mb-0.5">{{ device.hostname }}</h4>
       <div class="flex items-center flex-wrap gap-3 text-sm text-slate-500">
         <code class="bg-slate-100 rounded px-2 py-0.5 text-xs text-slate-600">{{ device.ip_address }}</code>
+        {% if device.device_type == 'huawei' %}
+          <span class="badge badge-purple"><i class="bi bi-diagram-3"></i>Huawei Switch</span>
+        {% else %}
+          <span class="badge badge-info"><i class="bi bi-router"></i>Junos</span>
+        {% endif %}
         {% if device.model %}<span class="flex items-center gap-1"><i class="bi bi-cpu text-slate-400"></i>{{ device.model }}</span>{% endif %}
         {% if device.location %}<span class="flex items-center gap-1"><i class="bi bi-geo-alt text-slate-400"></i>{{ device.location }}</span>{% endif %}
+        {% if device.use_telnet %}
+          <span class="badge badge-warning"><i class="bi bi-terminal"></i>Telnet :{{ device.telnet_port or 23 }}</span>
+        {% elif device.ssh_enabled %}
+          <span class="badge badge-success"><i class="bi bi-shield-check"></i>SSH :{{ device.ssh_port or 22 }}</span>
+        {% endif %}
       </div>
     </div>
     <div class="flex items-center gap-3 text-center">
@@ -179,9 +189,10 @@
             <i class="bi bi-plug"></i>
           </div>
           <div class="flex-1">
-            <div class="font-semibold text-sm text-slate-700">Step 1 — Router Login</div>
+            <div class="font-semibold text-sm text-slate-700">Step 1 — {% if device.device_type == 'huawei' %}Switch{% else %}Router{% endif %} Login</div>
             <div id="msg-login" class="text-xs text-slate-400 mt-0.5">
-              SSH connect to <code class="bg-slate-100 rounded px-1">{{ device.ip_address }}:{{ device.ssh_port or 22 }}</code>
+              {% if device.use_telnet %}Telnet{% else %}SSH{% endif %} connect to
+              <code class="bg-slate-100 rounded px-1">{{ device.ip_address }}:{{ (device.telnet_port or 23) if device.use_telnet else (device.ssh_port or 22) }}</code>
               as <code class="bg-slate-100 rounded px-1">{{ device.ssh_username or '(no user set)' }}</code>
             </div>
           </div>
@@ -197,7 +208,9 @@
           <div class="flex-1">
             <div class="font-semibold text-sm text-slate-400" id="label-backup">Step 2 — Capture &amp; Save Config</div>
             <div id="msg-backup" class="text-xs text-slate-400 mt-0.5">
-              Run <code class="bg-slate-100 rounded px-1">show configuration | display set | no-more</code>
+              Run <code class="bg-slate-100 rounded px-1" id="backupCmdLabel">
+                {% if device.device_type == 'huawei' %}display current-configuration{% else %}show configuration | display set | no-more{% endif %}
+              </code>
             </div>
           </div>
         </div>
